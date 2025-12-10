@@ -1,29 +1,29 @@
 // Default merit and demerit categories for cheer tracking
 
 export const defaultMeritCategories = [
-  { id: 'great-attitude', name: 'Great Attitude', points: 2, icon: '😊' },
-  { id: 'on-time', name: 'On Time', points: 1, icon: '⏰' },
-  { id: 'worked-hard', name: 'Worked Hard', points: 2, icon: '💪' },
-  { id: 'helped-teammate', name: 'Helped Teammate', points: 2, icon: '🤝' },
-  { id: 'nailed-routine', name: 'Nailed Routine', points: 3, icon: '⭐' },
-  { id: 'showed-leadership', name: 'Showed Leadership', points: 3, icon: '👑' },
-  { id: 'positive-energy', name: 'Positive Energy', points: 2, icon: '✨' },
-  { id: 'improved-skill', name: 'Improved Skill', points: 2, icon: '📈' },
-  { id: 'encouraged-others', name: 'Encouraged Others', points: 2, icon: '💬' },
-  { id: 'extra-effort', name: 'Extra Effort', points: 3, icon: '🔥' },
+  { id: 'great-attitude', name: 'Great Attitude', points: 5, icon: '😊' },
+  { id: 'on-time', name: 'On Time', points: 2, icon: '⏰' },
+  { id: 'worked-hard', name: 'Worked Hard', points: 6, icon: '💪' },
+  { id: 'helped-teammate', name: 'Helped Teammate', points: 5, icon: '🤝' },
+  { id: 'nailed-routine', name: 'Nailed Routine', points: 10, icon: '⭐' },
+  { id: 'showed-leadership', name: 'Showed Leadership', points: 8, icon: '👑' },
+  { id: 'positive-energy', name: 'Positive Energy', points: 4, icon: '✨' },
+  { id: 'improved-skill', name: 'Improved Skill', points: 7, icon: '📈' },
+  { id: 'encouraged-others', name: 'Encouraged Others', points: 4, icon: '💬' },
+  { id: 'extra-effort', name: 'Extra Effort', points: 8, icon: '🔥' },
 ];
 
 export const defaultDemeritCategories = [
-  { id: 'late', name: 'Late to Practice', points: -2, icon: '🕐' },
-  { id: 'unprepared', name: 'Unprepared', points: -1, icon: '📋' },
-  { id: 'disrespectful', name: 'Disrespectful', points: -3, icon: '😤' },
-  { id: 'not-trying', name: 'Not Trying', points: -2, icon: '😔' },
-  { id: 'talking-back', name: 'Talking Back', points: -2, icon: '🗣️' },
-  { id: 'distracted', name: 'Distracted', points: -1, icon: '📱' },
-  { id: 'negative-attitude', name: 'Negative Attitude', points: -2, icon: '👎' },
-  { id: 'missed-practice', name: 'Missed Practice', points: -3, icon: '❌' },
-  { id: 'unsafe-behavior', name: 'Unsafe Behavior', points: -3, icon: '⚠️' },
-  { id: 'uniform-violation', name: 'Uniform Violation', points: -1, icon: '👗' },
+  { id: 'late', name: 'Late to Practice', points: -5, icon: '🕐' },
+  { id: 'unprepared', name: 'Unprepared', points: -3, icon: '📋' },
+  { id: 'disrespectful', name: 'Disrespectful', points: -10, icon: '😤' },
+  { id: 'not-trying', name: 'Not Trying', points: -6, icon: '😔' },
+  { id: 'talking-back', name: 'Talking Back', points: -7, icon: '🗣️' },
+  { id: 'distracted', name: 'Distracted', points: -2, icon: '📱' },
+  { id: 'negative-attitude', name: 'Negative Attitude', points: -5, icon: '👎' },
+  { id: 'missed-practice', name: 'Missed Practice', points: -8, icon: '❌' },
+  { id: 'unsafe-behavior', name: 'Unsafe Behavior', points: -10, icon: '⚠️' },
+  { id: 'uniform-violation', name: 'Uniform Violation', points: -2, icon: '👗' },
 ];
 
 // Sample cheerleaders for demo
