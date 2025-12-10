@@ -1,70 +1,116 @@
-# Getting Started with Create React App
+# Cheer Merit Tracker
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A ClassDojo-style merit and demerit tracking system specifically designed for cheer coaches, cheerleaders, and parents.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+### For Coaches
+- **Squad Management**: Add, edit, and remove cheerleaders with custom avatars
+- **Merit/Demerit System**: Award or deduct points with pre-configured categories
+- **Leaderboard**: View squad rankings based on total points
+- **Activity Feed**: Track all point changes with timestamps and notes
+- **Announcements**: Post team-wide announcements
+- **Parent Codes**: Auto-generated codes for parent access
 
-### `npm start`
+### For Cheerleaders
+- **Progress Tracking**: View personal point totals and history
+- **Squad Leaderboard**: See how you rank among teammates
+- **Weekly Stats**: Track weekly point changes
+- **Team Announcements**: Stay updated with coach communications
 
-Runs the app in the development mode.\
+### For Parents
+- **Child Monitoring**: View your child's merit/demerit history
+- **Progress Overview**: See total points, ranking, and weekly changes
+- **Point Breakdown**: Visual breakdown of merits vs demerits
+- **Coach Communication**: Send messages to the coach
+- **Announcements**: View team announcements
+
+## Merit Categories
+- Great Attitude (+2)
+- On Time (+1)
+- Worked Hard (+2)
+- Helped Teammate (+2)
+- Nailed Routine (+3)
+- Showed Leadership (+3)
+- Positive Energy (+2)
+- Improved Skill (+2)
+- Encouraged Others (+2)
+- Extra Effort (+3)
+
+## Demerit Categories
+- Late to Practice (-2)
+- Unprepared (-1)
+- Disrespectful (-3)
+- Not Trying (-2)
+- Talking Back (-2)
+- Distracted (-1)
+- Negative Attitude (-2)
+- Missed Practice (-3)
+- Unsafe Behavior (-3)
+- Uniform Violation (-1)
+
+## Getting Started
+
+### Installation
+
+```bash
+npm install
+```
+
+### Running the App
+
+```bash
+npm start
+```
+
 Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### Demo Credentials
 
-### `npm test`
+**Coach**: Enter any name to login as a coach
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+**Cheerleader**: Select from the pre-loaded cheerleaders
 
-### `npm run build`
+**Parent Codes** (for testing):
+- EMMA2024
+- SOPHIA2024
+- OLIVIA2024
+- AVA2024
+- ISABELLA2024
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Tech Stack
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+- **React 18** - UI framework
+- **React Router** - Navigation
+- **Context API** - State management
+- **LocalStorage** - Data persistence
+- **CSS3** - Styling with CSS variables and responsive design
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Project Structure
 
-### `npm run eject`
+```
+src/
+  contexts/
+    AppContext.js       # Global state management
+  components/
+    CheerleaderCard.js  # Individual cheerleader display
+    AddCheerleaderModal.js
+    PointModal.js       # Merit/demerit selection
+    RecentActivity.js   # Activity feed
+    AnnouncementSection.js
+  pages/
+    LoginPage.js        # Role selection & login
+    CoachDashboard.js   # Coach interface
+    CheerleaderDashboard.js
+    ParentDashboard.js
+  data/
+    defaultCategories.js # Merit/demerit definitions
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## Building for Production
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+npm run build
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Builds the app for production to the `build` folder.
