@@ -1,19 +1,33 @@
 import React, { useState } from 'react';
 import { useApp } from '../contexts/AppContext';
+import EmojiPicker from './EmojiPicker';
+import CheerleaderFields from './CheerleaderFields';
 import { avatarOptions } from '../data/defaultCategories';
 
 const AddCheerleaderModal = ({ onClose }) => {
-  const { addCheerleader } = useApp();
+  const { addCheerleader, setCheerleaderGroups } = useApp();
   const [name, setName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(avatarOptions[0]);
+  const [position, setPosition] = useState('');
+  const [notes, setNotes] = useState('');
+  const [groupIds, setGroupIds] = useState([]);
   const [newCheerleader, setNewCheerleader] = useState(null);
+
+  const toggleGroup = (id) => {
+    setGroupIds(prev => (prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id]));
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (name.trim()) {
-      const cheerleader = addCheerleader(name.trim(), selectedAvatar);
-      setNewCheerleader(cheerleader);
+    if (!name.trim()) return;
+    const cheerleader = addCheerleader(name.trim(), selectedAvatar, {
+      position,
+      notes: notes.trim(),
+    });
+    if (groupIds.length > 0) {
+      setCheerleaderGroups(cheerleader.id, groupIds);
     }
+    setNewCheerleader(cheerleader);
   };
 
   if (newCheerleader) {
@@ -57,29 +71,34 @@ const AddCheerleaderModal = ({ onClose }) => {
               placeholder="Enter cheerleader's name"
               required
               autoFocus
+              maxLength={40}
             />
           </div>
 
-          <div className="form-group">
-            <label>Choose Avatar</label>
-            <div className="avatar-picker">
-              {avatarOptions.map((avatar) => (
-                <button
-                  key={avatar}
-                  type="button"
-                  className={`avatar-option ${selectedAvatar === avatar ? 'selected' : ''}`}
-                  onClick={() => setSelectedAvatar(avatar)}
-                >
-                  {avatar}
-                </button>
-              ))}
-            </div>
-          </div>
+          <EmojiPicker
+            value={selectedAvatar}
+            onChange={setSelectedAvatar}
+            options={avatarOptions}
+            label="Choose Avatar"
+          />
+
+          <CheerleaderFields
+            position={position}
+            onPosition={setPosition}
+            notes={notes}
+            onNotes={setNotes}
+            groupIds={groupIds}
+            onToggleGroup={toggleGroup}
+          />
 
           <div className="preview">
             <span className="avatar-preview">{selectedAvatar}</span>
             <span className="name-preview">{name || 'Name'}</span>
           </div>
+
+          <p className="settings-hint">
+            A parent code is generated automatically — you'll see it on the next screen.
+          </p>
 
           <div className="form-actions">
             <button type="button" className="cancel-btn" onClick={onClose}>

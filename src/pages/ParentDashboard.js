@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import RecentActivity from '../components/RecentActivity';
 import AnnouncementSection from '../components/AnnouncementSection';
+import TierProgress from '../components/TierProgress';
 
 const ParentDashboard = () => {
   const navigate = useNavigate();
@@ -12,7 +13,10 @@ const ParentDashboard = () => {
     cheerleaders,
     getCheerleaderHistory,
     sendMessage,
-    getMessagesForUser
+    getMessagesForUser,
+    rewardTiers,
+    getTierForPoints,
+    currentSeason
   } = useApp();
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -32,18 +36,22 @@ const ParentDashboard = () => {
   // Get messages
   const myMessages = getMessagesForUser(currentUser?.id || '');
 
-  // Calculate stats
-  const totalMerits = childHistory.filter(h => h.isMerit).reduce((sum, h) => sum + h.points, 0);
-  const totalDemerits = childHistory.filter(h => !h.isMerit).reduce((sum, h) => sum + h.points, 0);
+  // Calculate stats. Scoped to the current season so they can't contradict the
+  // "Total Points" figure after the coach starts a new season.
+  const seasonHistory = childHistory.filter(h => h.seasonId === currentSeason.id);
+  const totalMerits = seasonHistory.filter(h => h.isMerit).reduce((sum, h) => sum + (h.points || 0), 0);
+  const totalDemerits = seasonHistory.filter(h => !h.isMerit).reduce((sum, h) => sum + (h.points || 0), 0);
 
   // This week stats
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
-  const thisWeekHistory = childHistory.filter(h => new Date(h.timestamp) >= weekAgo);
-  const weeklyChange = thisWeekHistory.reduce((sum, h) => sum + h.points, 0);
+  const thisWeekHistory = seasonHistory.filter(h => new Date(h.timestamp) >= weekAgo);
+  const weeklyChange = thisWeekHistory.reduce((sum, h) => sum + (h.points || 0), 0);
 
   // Get ranking
-  const sortedCheerleaders = [...cheerleaders].sort((a, b) => b.totalPoints - a.totalPoints);
+  const sortedCheerleaders = [...cheerleaders].sort(
+    (a, b) => (b.totalPoints || 0) - (a.totalPoints || 0)
+  );
   const childRank = sortedCheerleaders.findIndex(c => c.id === childId) + 1;
 
   // Handle sending message to coach
@@ -83,9 +91,10 @@ const ParentDashboard = () => {
       <div className="child-profile-hero">
         <div className="hero-avatar">{childData.avatar}</div>
         <h2>{childData.name}'s Progress</h2>
+        <TierProgress points={childData.totalPoints ?? 0} />
         <div className="hero-stats">
           <div className="stat-item total">
-            <span className="stat-value">{childData.totalPoints}</span>
+            <span className="stat-value">{childData.totalPoints ?? 0}</span>
             <span className="stat-label">Total Points</span>
           </div>
           <div className="stat-item rank">
@@ -152,6 +161,31 @@ const ParentDashboard = () => {
                 limit={10}
               />
             </div>
+
+            {rewardTiers.length > 0 && (
+              <div className="section-card">
+                <h3>Reward Levels</h3>
+                <p className="settings-hint">
+                  Levels are set by the coach. {childData.name} is at{' '}
+                  {getTierForPoints(childData.totalPoints ?? 0)?.name || 'no level yet'}.
+                </p>
+                <div className="tier-admin-list">
+                  {[...rewardTiers]
+                    .sort((a, b) => a.threshold - b.threshold)
+                    .map(tier => {
+                      const achieved = (childData.totalPoints ?? 0) >= tier.threshold;
+                      return (
+                        <div key={tier.id} className={`tier-row ${achieved ? 'achieved' : ''}`}>
+                          <span className="tier-row-icon">{tier.icon}</span>
+                          <span className="tier-row-name">{tier.name}</span>
+                          <span className="tier-threshold">{tier.threshold} pts</span>
+                          <span className="tier-row-state">{achieved ? '✓' : ''}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
 
             <div className="section-card breakdown">
               <h3>Points Breakdown</h3>

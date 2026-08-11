@@ -1,11 +1,20 @@
 import React from 'react';
 import { useApp } from '../contexts/AppContext';
 
-const RecentActivity = ({ history, cheerleaders, limit = 20 }) => {
+const RecentActivity = ({
+  history,
+  cheerleaders,
+  limit = 20,
+  showUndo,
+  emptyMessage = 'No activity yet. Start awarding merits and demerits!',
+}) => {
   const { removePointEntry, userRole } = useApp();
+  const canUndo = showUndo === undefined ? userRole === 'coach' : showUndo;
 
   const formatDate = (timestamp) => {
+    if (!timestamp) return '';
     const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return '';
     const now = new Date();
     const diffMs = now - date;
     const diffMins = Math.floor(diffMs / 60000);
@@ -24,12 +33,12 @@ const RecentActivity = ({ history, cheerleaders, limit = 20 }) => {
     return cheerleader ? { name: cheerleader.name, avatar: cheerleader.avatar } : { name: 'Unknown', avatar: '❓' };
   };
 
-  const displayHistory = history.slice(0, limit);
+  const displayHistory = (history || []).slice(0, limit);
 
   if (displayHistory.length === 0) {
     return (
       <div className="recent-activity empty">
-        <p>No activity yet. Start awarding merits and demerits!</p>
+        <p>{emptyMessage}</p>
       </div>
     );
   }
@@ -39,6 +48,12 @@ const RecentActivity = ({ history, cheerleaders, limit = 20 }) => {
       <ul className="activity-list">
         {displayHistory.map((entry) => {
           const cheerleader = getCheerleaderName(entry.cheerleaderId);
+          // Entries saved by older versions may have no category snapshot, and a
+          // category can be deleted after the fact — render what we have.
+          const category = entry.category || {};
+          const icon = category.icon || (entry.isMerit ? '⭐' : '⚠️');
+          const categoryName = category.name || 'Point Adjustment';
+          const points = entry.points ?? 0;
           return (
             <li key={entry.id} className={`activity-item ${entry.isMerit ? 'merit' : 'demerit'}`}>
               <div className="activity-avatar">{cheerleader.avatar}</div>
@@ -49,7 +64,7 @@ const RecentActivity = ({ history, cheerleaders, limit = 20 }) => {
                     {entry.isMerit ? 'earned' : 'received'}
                   </span>
                   <span className="activity-category">
-                    {entry.category.icon} {entry.category.name}
+                    {icon} {categoryName}
                   </span>
                 </div>
                 {entry.note && <p className="activity-note">"{entry.note}"</p>}
@@ -59,11 +74,11 @@ const RecentActivity = ({ history, cheerleaders, limit = 20 }) => {
                 </div>
               </div>
               <div className="activity-points">
-                <span className={entry.points > 0 ? 'positive' : 'negative'}>
-                  {entry.points > 0 ? '+' : ''}{entry.points}
+                <span className={points > 0 ? 'positive' : 'negative'}>
+                  {points > 0 ? '+' : ''}{points}
                 </span>
               </div>
-              {userRole === 'coach' && (
+              {canUndo && (
                 <button
                   className="undo-btn"
                   onClick={() => removePointEntry(entry.id)}
