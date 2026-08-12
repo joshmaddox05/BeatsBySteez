@@ -169,24 +169,41 @@ export const removeCheerleader = async (squadId, cheerleaderId) => {
   await batch.commit();
 };
 
-export const awardPoints = async (squadId, cheerleaderId, category, isMerit, note, awardedByUid, awardedByName) => {
+// `points` is the rule-adjusted value from evaluateAward, which can differ from
+// category.points when a daily cap or the zero floor trims the award.
+export const awardPoints = async (
+  squadId,
+  cheerleaderId,
+  category,
+  isMerit,
+  note,
+  awardedByUid,
+  awardedByName,
+  points,
+  seasonId
+) => {
+  const applied = points === undefined ? category.points : points;
   const entryRef = doc(collection(db, 'squads', squadId, 'pointHistory'));
   const entry = {
     cheerleaderId,
     category,
-    points: category.points,
+    points: applied,
     isMerit,
     note: note || '',
     timestamp: serverTimestamp(),
     awardedByUid,
     awardedByName,
+    seasonId: seasonId || null,
   };
 
   const batch = writeBatch(db);
   batch.set(entryRef, entry);
   batch.set(
     doc(db, 'squads', squadId, 'cheerleaders', cheerleaderId),
-    { totalPoints: increment(category.points) },
+    {
+      totalPoints: increment(applied),
+      lifetimePoints: increment(Math.max(0, applied)),
+    },
     { merge: true }
   );
   await batch.commit();
@@ -269,34 +286,45 @@ export const regenerateParentCode = async (squadId, cheerleaderId, name) => {
 
 // Awards the same category to several cheerleaders in one batch so the roster
 // updates in a single Firestore round trip instead of one per cheerleader.
+// `awards` is [{ cheerleaderId, points }] — points already rule-adjusted by the
+// caller, since the squad rules can trim each cheerleader's award differently.
 export const bulkAwardPoints = async (
   squadId,
-  cheerleaderIds,
+  awards,
   category,
   isMerit,
   note,
   awardedByUid,
-  awardedByName
+  awardedByName,
+  bulkId,
+  seasonId
 ) => {
+  if (awards.length === 0) return [];
+
   const batch = writeBatch(db);
   const entries = [];
 
-  cheerleaderIds.forEach((cheerleaderId) => {
+  awards.forEach(({ cheerleaderId, points }) => {
     const entryRef = doc(collection(db, 'squads', squadId, 'pointHistory'));
     const entry = {
       cheerleaderId,
       category,
-      points: category.points,
+      points,
       isMerit,
       note: note || '',
       timestamp: serverTimestamp(),
       awardedByUid,
       awardedByName,
+      bulkId: bulkId || null,
+      seasonId: seasonId || null,
     };
     batch.set(entryRef, entry);
     batch.set(
       doc(db, 'squads', squadId, 'cheerleaders', cheerleaderId),
-      { totalPoints: increment(category.points) },
+      {
+        totalPoints: increment(points),
+        lifetimePoints: increment(Math.max(0, points)),
+      },
       { merge: true }
     );
     entries.push({ id: entryRef.id, ...entry });

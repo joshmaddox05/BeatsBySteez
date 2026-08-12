@@ -207,8 +207,131 @@ export const AppProvider = ({ children }) => {
   const removeCheerleader = (id) => squadApi.removeCheerleader(profile.squadId, id);
 
   // Points
-  const awardPoints = (cheerleaderId, category, isMerit, note = '') =>
-    squadApi.awardPoints(profile.squadId, cheerleaderId, category, isMerit, note, firebaseUser.uid, profile.displayName);
+  //
+  // Applies the squad rules to a single award and reports what would actually
+  // land. Callers award only when ok, and show `message` when not.
+  const evaluateAward = (cheerleader, category, isMerit, note, usedTodayOverride) => {
+    if (!cheerleader) {
+      return { ok: false, reason: 'not-found', message: 'That cheerleader no longer exists.' };
+    }
+
+    const merit = typeof isMerit === 'boolean' ? isMerit : category.type !== 'demerit';
+    const magnitude = Math.abs(Number(category.points) || 0);
+    const nominal = merit ? magnitude : -magnitude;
+    let applied = nominal;
+    let capped = false;
+    let clamped = false;
+
+    if (squadRules.requireNoteOnDemerits && !merit && !String(note || '').trim()) {
+      return { ok: false, reason: 'note-required', message: 'A note is required for demerits.' };
+    }
+
+    if (squadRules.dailyPointCap > 0) {
+      const used =
+        usedTodayOverride === undefined ? getTodayPointTotal(cheerleader.id) : usedTodayOverride;
+      const remaining = squadRules.dailyPointCap - used;
+      if (remaining <= 0) {
+        return {
+          ok: false,
+          reason: 'daily-cap',
+          message: `${cheerleader.name} has hit today's ${squadRules.dailyPointCap}-point limit.`,
+        };
+      }
+      if (Math.abs(applied) > remaining) {
+        applied = merit ? remaining : -remaining;
+        capped = true;
+      }
+    }
+
+    const total = Number(cheerleader.totalPoints) || 0;
+    if (!squadRules.allowNegativeTotals && total + applied < 0) {
+      applied = -total;
+      clamped = true;
+    }
+
+    if (applied === 0) {
+      return {
+        ok: false,
+        reason: 'floor-reached',
+        message: merit
+          ? `No points left to award ${cheerleader.name} today.`
+          : `${cheerleader.name} is already at 0 points.`,
+      };
+    }
+
+    return { ok: true, applied, nominal, capped, clamped, merit };
+  };
+
+  const awardPoints = async (cheerleaderId, category, isMerit, note = '') => {
+    const cheerleader = cheerleaders.find((c) => c.id === cheerleaderId);
+    const verdict = evaluateAward(cheerleader, category, isMerit, note);
+    if (!verdict.ok) return verdict;
+
+    const entry = await squadApi.awardPoints(
+      profile.squadId,
+      cheerleaderId,
+      category,
+      verdict.merit,
+      note,
+      firebaseUser.uid,
+      profile.displayName,
+      verdict.applied,
+      currentSeason?.id
+    );
+    return { ...verdict, entry };
+  };
+
+  // Best-effort per cheerleader: the squad rules can legitimately reject some
+  // targets and not others, so the caller gets a per-target result to show.
+  const bulkAwardPoints = async (cheerleaderIds, category, isMerit, note = '') => {
+    const bulkId = `bulk-${Date.now()}`;
+    const uniqueIds = [...new Set(cheerleaderIds)];
+    const awards = [];
+    const results = [];
+
+    uniqueIds.forEach((id) => {
+      const cheerleader = cheerleaders.find((c) => c.id === id);
+      const verdict = evaluateAward(cheerleader, category, isMerit, note);
+      if (!verdict.ok) {
+        results.push({
+          cheerleaderId: id,
+          name: cheerleader?.name || 'Unknown',
+          ok: false,
+          reason: verdict.reason,
+          message: verdict.message,
+        });
+        return;
+      }
+      awards.push({ cheerleaderId: id, points: verdict.applied });
+      results.push({
+        cheerleaderId: id,
+        name: cheerleader.name,
+        ok: true,
+        applied: verdict.applied,
+        capped: verdict.capped,
+        clamped: verdict.clamped,
+      });
+    });
+
+    await squadApi.bulkAwardPoints(
+      profile.squadId,
+      awards,
+      category,
+      typeof isMerit === 'boolean' ? isMerit : category.type !== 'demerit',
+      note,
+      firebaseUser.uid,
+      profile.displayName,
+      bulkId,
+      currentSeason?.id
+    );
+
+    return {
+      bulkId,
+      successCount: results.filter((r) => r.ok).length,
+      failCount: results.filter((r) => !r.ok).length,
+      results,
+    };
+  };
 
   const removePointEntry = (entryId) => squadApi.removePointEntry(profile.squadId, entryId);
 
@@ -243,17 +366,6 @@ export const AppProvider = ({ children }) => {
 
   const regenerateParentCode = (cheerleaderId, name) =>
     squadApi.regenerateParentCode(profile.squadId, cheerleaderId, name);
-
-  const bulkAwardPoints = (cheerleaderIds, category, isMerit, note = '') =>
-    squadApi.bulkAwardPoints(
-      profile.squadId,
-      cheerleaderIds,
-      category,
-      isMerit,
-      note,
-      firebaseUser.uid,
-      profile.displayName
-    );
 
   const getTodayPointTotal = (cheerleaderId) => {
     const today = new Date().toDateString();
