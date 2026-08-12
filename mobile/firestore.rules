@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function inSquad(squadId) {
+      return isSignedIn() && myProfile().squadId == squadId;
+    }
+
+    function isCoachOfSquad(squadId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/squads/$(squadId)).data.coachId == request.auth.uid;
+    }
+
+    // A user's own profile: role, squadId, linkedCheerleaderId. Only the owner can read/write it.
+    match /users/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /squads/{squadId} {
+      // Public read: lets the sign-up flow resolve an invite code and show the squad name
+      // before the person has an account yet. Only the coach doc's own fields are exposed.
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.coachId == request.auth.uid;
+      allow update, delete: if isCoachOfSquad(squadId);
+
+      match /cheerleaders/{cheerleaderId} {
+        // Public read: the join flow lists roster names/avatars so a cheerleader/parent can
+        // pick/link the right one before signing up. Only the coach can write the roster.
+        allow read: if true;
+        allow write: if isCoachOfSquad(squadId);
+      }
+
+      match /categories/{categoryId} {
+        allow read: if true;
+        allow write: if isCoachOfSquad(squadId);
+      }
+
+      match /groups/{groupId} {
+        // Public read for the same reason as the roster: the join flow shows
+        // which group a cheerleader belongs to before she has an account.
+        allow read: if true;
+        allow write: if isCoachOfSquad(squadId);
+      }
+
+      match /rewardTiers/{tierId} {
+        allow read: if inSquad(squadId);
+        allow write: if isCoachOfSquad(squadId);
+      }
+
+      match /pointHistory/{entryId} {
+        allow read: if inSquad(squadId);
+        allow create, delete: if isCoachOfSquad(squadId);
+      }
+
+      // Archived seasons: a snapshot of pointHistory taken when a season ends.
+      match /seasons/{seasonId} {
+        allow read: if inSquad(squadId);
+        allow write: if isCoachOfSquad(squadId);
+
+        match /entries/{entryId} {
+          allow read: if inSquad(squadId);
+          allow write: if isCoachOfSquad(squadId);
+        }
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if inSquad(squadId);
+        allow write: if isCoachOfSquad(squadId);
+      }
+
+      match /messages/{messageId} {
+        allow read: if inSquad(squadId);
+        allow create: if inSquad(squadId) && request.resource.data.fromId == request.auth.uid;
+        allow update: if inSquad(squadId);
+      }
+    }
+  }
+}
