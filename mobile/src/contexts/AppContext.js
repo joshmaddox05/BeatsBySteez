@@ -5,6 +5,7 @@ import { auth, db } from '../firebase/config';
 import * as authApi from '../firebase/auth';
 import * as squadApi from '../firebase/squad';
 import { defaultSquadRules } from '../data/defaultCategories';
+import { presetPacks } from '../data/presetPacks';
 
 const AppContext = createContext();
 
@@ -352,17 +353,37 @@ export const AppProvider = ({ children }) => {
   const getUnreadCount = (userId) => messages.filter((m) => m.toId === userId && !m.read).length;
 
   // Categories
-  const addMeritCategory = (name, points, icon) => squadApi.addMeritCategory(profile.squadId, name, points, icon);
-  const addDemeritCategory = (name, points, icon) => squadApi.addDemeritCategory(profile.squadId, name, points, icon);
+  const addMeritCategory = (name, points, icon) =>
+    squadApi.addMeritCategory(profile.squadId, name, points, icon, meritCategories.length);
+  const addDemeritCategory = (name, points, icon) =>
+    squadApi.addDemeritCategory(profile.squadId, name, points, icon, demeritCategories.length);
   const addCategory = (name, points, icon, isMerit) =>
     isMerit
       ? squadApi.addMeritCategory(profile.squadId, name, points, icon)
       : squadApi.addDemeritCategory(profile.squadId, name, points, icon);
   const updateCategory = (id, updates) => squadApi.updateCategory(profile.squadId, id, updates);
   const deleteCategory = (id) => squadApi.deleteCategory(profile.squadId, id);
-  const reorderCategory = (id, newOrder) => squadApi.reorderCategory(profile.squadId, id, newOrder);
-  const loadPresetPack = (pack, replaceExisting = false) =>
-    squadApi.loadPresetPack(profile.squadId, pack, replaceExisting);
+  // Rewrites the whole list's order rather than swapping two values, so
+  // categories added before `order` existed get normalized on first move.
+  const reorderCategory = (id, direction) => {
+    const isMerit = meritCategories.some((c) => c.id === id);
+    const list = isMerit ? meritCategories : demeritCategories;
+    const index = list.findIndex((c) => c.id === id);
+    const target = direction === 'up' ? index - 1 : index + 1;
+    if (index === -1 || target < 0 || target >= list.length) return Promise.resolve();
+
+    const next = [...list];
+    [next[index], next[target]] = [next[target], next[index]];
+    return Promise.all(next.map((c, i) => squadApi.reorderCategory(profile.squadId, c.id, i)));
+  };
+
+  const loadPresetPack = async (packId, mode) => {
+    const pack = presetPacks.find((p) => p.id === packId);
+    if (!pack) return { added: 0, removed: 0 };
+    const removed = mode === 'replace' ? meritCategories.length + demeritCategories.length : 0;
+    await squadApi.loadPresetPack(profile.squadId, pack, mode === 'replace');
+    return { added: pack.categories.length, removed };
+  };
 
   const regenerateParentCode = (cheerleaderId, name) =>
     squadApi.regenerateParentCode(profile.squadId, cheerleaderId, name);
@@ -403,12 +424,33 @@ export const AppProvider = ({ children }) => {
   };
 
   // Rules
-  const squadRules = squad?.rules || defaultSquadRules;
-  const updateSquadRules = (rules) => squadApi.updateSquadRules(profile.squadId, rules);
+  const squadRules = { ...defaultSquadRules, ...(squad?.rules || {}) };
+  // Takes a partial patch so callers can flip one setting without restating the rest.
+  const updateSquadRules = (patch) =>
+    squadApi.updateSquadRules(profile.squadId, {
+      ...squadRules,
+      ...patch,
+      dailyPointCap: Math.max(0, Number(patch.dailyPointCap ?? squadRules.dailyPointCap) || 0),
+    });
 
   // Seasons
   const currentSeason = squad?.currentSeason || null;
-  const startNewSeason = (seasonName) => squadApi.startNewSeason(profile.squadId, seasonName);
+
+  // Snapshots the standings before the reset, so an archived season stays
+  // browsable even though live totals go back to zero.
+  const startNewSeason = (seasonName) => {
+    const standings = [...cheerleaders]
+      .sort((a, b) => (b.totalPoints || 0) - (a.totalPoints || 0))
+      .map((c) => ({
+        cheerleaderId: c.id,
+        name: c.name,
+        avatar: c.avatar,
+        totalPoints: c.totalPoints || 0,
+        tierName: getTierForPoints(c.totalPoints || 0)?.name || null,
+      }));
+    const name = (seasonName || '').trim() || `Season ${seasons.length + 2}`;
+    return squadApi.startNewSeason(profile.squadId, name, standings);
+  };
   const getSeasonEntries = (seasonId) => squadApi.getSeasonEntries(profile.squadId, seasonId);
   const deleteArchivedSeason = (seasonId) => squadApi.deleteArchivedSeason(profile.squadId, seasonId);
 

@@ -430,21 +430,27 @@ export const loadPresetPack = async (squadId, pack, replaceExisting) => {
 
 // Ends the current season by copying its point history into an archive, then
 // clears live history and resets every running total back to zero.
-export const startNewSeason = async (squadId, seasonName) => {
+export const startNewSeason = async (squadId, seasonName, standings) => {
   const squadSnap = await getDoc(doc(db, 'squads', squadId));
   const previous = squadSnap.data()?.currentSeason;
 
   const historySnap = await getDocs(collection(db, 'squads', squadId, 'pointHistory'));
   const rosterSnap = await getDocs(collection(db, 'squads', squadId, 'cheerleaders'));
 
+  const now = new Date().toISOString();
   const batch = writeBatch(db);
 
-  if (previous) {
-    batch.set(doc(db, 'squads', squadId, 'seasons', previous.id), {
-      ...previous,
-      endedAt: new Date().toISOString(),
-      entryCount: historySnap.size,
-    });
+  const archived = previous
+    ? {
+        ...previous,
+        endedAt: now,
+        entryCount: historySnap.size,
+        standings: standings || [],
+      }
+    : null;
+
+  if (archived) {
+    batch.set(doc(db, 'squads', squadId, 'seasons', previous.id), archived);
     historySnap.docs.forEach((d) => {
       batch.set(doc(db, 'squads', squadId, 'seasons', previous.id, 'entries', d.id), d.data());
     });
@@ -453,19 +459,15 @@ export const startNewSeason = async (squadId, seasonName) => {
   historySnap.docs.forEach((d) => batch.delete(d.ref));
   rosterSnap.docs.forEach((d) => batch.set(d.ref, { totalPoints: 0 }, { merge: true }));
 
-  batch.set(
-    doc(db, 'squads', squadId),
-    {
-      currentSeason: {
-        id: `season-${Date.now()}`,
-        name: seasonName,
-        startedAt: new Date().toISOString(),
-      },
-    },
-    { merge: true }
-  );
+  const current = {
+    id: `season-${Date.now()}`,
+    name: seasonName,
+    startedAt: now,
+  };
+  batch.set(doc(db, 'squads', squadId), { currentSeason: current }, { merge: true });
 
   await batch.commit();
+  return { archived, current };
 };
 
 export const getSeasonEntries = async (squadId, seasonId) => {
@@ -481,16 +483,16 @@ export const deleteArchivedSeason = async (squadId, seasonId) => {
   await batch.commit();
 };
 
-export const addMeritCategory = async (squadId, name, points, icon) => {
+export const addMeritCategory = async (squadId, name, points, icon, order = 0) => {
   const ref = doc(collection(db, 'squads', squadId, 'categories'));
-  const category = { name, points, icon, isMerit: true };
+  const category = { name, points: Math.abs(points), icon, isMerit: true, order };
   await setDoc(ref, category);
   return { id: ref.id, ...category };
 };
 
-export const addDemeritCategory = async (squadId, name, points, icon) => {
+export const addDemeritCategory = async (squadId, name, points, icon, order = 0) => {
   const ref = doc(collection(db, 'squads', squadId, 'categories'));
-  const category = { name, points: -Math.abs(points), icon, isMerit: false };
+  const category = { name, points: -Math.abs(points), icon, isMerit: false, order };
   await setDoc(ref, category);
   return { id: ref.id, ...category };
 };
