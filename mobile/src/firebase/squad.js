@@ -17,6 +17,10 @@ import { defaultMeritCategories, defaultDemeritCategories, defaultSquadRules } f
 import { buildDefaultGroups } from '../data/defaultGroups';
 import { defaultRewardTiers } from '../data/defaultRewardTiers';
 
+// Bump when a new default collection or squad field is introduced, so existing
+// squads pick it up on next load.
+const SQUAD_DEFAULTS_VERSION = 2;
+
 const randomInviteCode = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
@@ -41,6 +45,7 @@ export const createSquad = async (coachUid, squadName) => {
     inviteCode,
     rules: defaultSquadRules,
     currentSeason: { id: `season-${Date.now()}`, name: 'Season 1', startedAt: new Date().toISOString() },
+    defaultsVersion: SQUAD_DEFAULTS_VERSION,
     createdAt: serverTimestamp(),
   });
 
@@ -64,6 +69,52 @@ export const createSquad = async (coachUid, squadName) => {
   await batch.commit();
 
   return { squadId: squadRef.id, inviteCode };
+};
+
+// Squads created before groups/tiers/seasons existed have none of those docs.
+// Backfills them once, guarded by defaultsVersion so a coach opening the app on
+// two devices cannot seed twice.
+export const ensureSquadDefaults = async (squadId) => {
+  const squadRef = doc(db, 'squads', squadId);
+  const squadSnap = await getDoc(squadRef);
+  if (!squadSnap.exists()) return;
+
+  const data = squadSnap.data();
+  if ((data.defaultsVersion || 0) >= SQUAD_DEFAULTS_VERSION) return;
+
+  const [groupsSnap, tiersSnap] = await Promise.all([
+    getDocs(collection(db, 'squads', squadId, 'groups')),
+    getDocs(collection(db, 'squads', squadId, 'rewardTiers')),
+  ]);
+
+  const batch = writeBatch(db);
+
+  if (groupsSnap.empty) {
+    buildDefaultGroups().forEach((group) => {
+      const { id, ...rest } = group;
+      batch.set(doc(db, 'squads', squadId, 'groups', id), rest);
+    });
+  }
+
+  if (tiersSnap.empty) {
+    defaultRewardTiers.forEach((tier) => {
+      const { id, ...rest } = tier;
+      batch.set(doc(db, 'squads', squadId, 'rewardTiers', id), rest);
+    });
+  }
+
+  const patch = { defaultsVersion: SQUAD_DEFAULTS_VERSION };
+  if (!data.rules) patch.rules = defaultSquadRules;
+  if (!data.currentSeason) {
+    patch.currentSeason = {
+      id: `season-${Date.now()}`,
+      name: 'Season 1',
+      startedAt: new Date().toISOString(),
+    };
+  }
+  batch.set(squadRef, patch, { merge: true });
+
+  await batch.commit();
 };
 
 export const resolveInviteCode = async (inviteCode) => {

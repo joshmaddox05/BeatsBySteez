@@ -68,6 +68,13 @@ export const AppProvider = ({ children }) => {
     return unsubscribe;
   }, [profile?.squadId]);
 
+  // Backfill defaults onto squads created before groups/tiers/seasons existed.
+  // Coach-only: firestore.rules restrict these writes to the squad's coach.
+  useEffect(() => {
+    if (!profile?.squadId || profile.role !== 'coach') return;
+    squadApi.ensureSquadDefaults(profile.squadId).catch(() => {});
+  }, [profile?.squadId, profile?.role]);
+
   // Squad sub-collections
   useEffect(() => {
     const squadId = profile?.squadId;
