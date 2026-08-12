@@ -4,6 +4,7 @@ import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { auth, db } from '../firebase/config';
 import * as authApi from '../firebase/auth';
 import * as squadApi from '../firebase/squad';
+import { defaultSquadRules } from '../data/defaultCategories';
 
 const AppContext = createContext();
 
@@ -29,6 +30,9 @@ export const AppProvider = ({ children }) => {
   const [demeritCategories, setDemeritCategories] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [rewardTiers, setRewardTiers] = useState([]);
+  const [seasons, setSeasons] = useState([]);
 
   // Auth state
   useEffect(() => {
@@ -74,6 +78,9 @@ export const AppProvider = ({ children }) => {
       setDemeritCategories([]);
       setAnnouncements([]);
       setMessages([]);
+      setGroups([]);
+      setRewardTiers([]);
+      setSeasons([]);
       return undefined;
     }
 
@@ -94,9 +101,27 @@ export const AppProvider = ({ children }) => {
     );
 
     const unsubCategories = onSnapshot(collection(db, 'squads', squadId, 'categories'), (snap) => {
-      const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const all = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       setMeritCategories(all.filter((c) => c.isMerit));
       setDemeritCategories(all.filter((c) => !c.isMerit));
+    });
+
+    const unsubGroups = onSnapshot(collection(db, 'squads', squadId, 'groups'), (snap) => {
+      setGroups(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+
+    // Tiers are always read threshold-ascending so "highest tier reached" is a
+    // simple scan from the end.
+    const unsubTiers = onSnapshot(collection(db, 'squads', squadId, 'rewardTiers'), (snap) => {
+      setRewardTiers(
+        snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.threshold - b.threshold)
+      );
+    });
+
+    const unsubSeasons = onSnapshot(collection(db, 'squads', squadId, 'seasons'), (snap) => {
+      setSeasons(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
 
     const unsubAnnouncements = onSnapshot(
@@ -129,6 +154,9 @@ export const AppProvider = ({ children }) => {
       unsubCategories();
       unsubAnnouncements();
       unsubMessages();
+      unsubGroups();
+      unsubTiers();
+      unsubSeasons();
     };
   }, [profile?.squadId]);
 
@@ -142,6 +170,12 @@ export const AppProvider = ({ children }) => {
       cheerleaderId: profile.role === 'cheerleader' ? profile.linkedCheerleaderId : undefined,
     };
   }, [firebaseUser, profile]);
+
+  // Combined view of both category lists, for screens that render one grid.
+  const pointCategories = useMemo(
+    () => [...meritCategories, ...demeritCategories],
+    [meritCategories, demeritCategories]
+  );
 
   const userRole = profile?.role || null;
   const sessionLoading = authLoading || (!!firebaseUser && profile === undefined);
@@ -184,9 +218,76 @@ export const AppProvider = ({ children }) => {
   const getMessagesForUser = (userId) => messages.filter((m) => m.toId === userId || m.fromId === userId);
   const markMessageAsRead = (messageId) => squadApi.markMessageAsRead(profile.squadId, messageId);
 
+  const markThreadAsRead = (otherId) => squadApi.markThreadAsRead(profile.squadId, firebaseUser.uid, otherId);
+  const getUnreadCount = (userId) => messages.filter((m) => m.toId === userId && !m.read).length;
+
   // Categories
   const addMeritCategory = (name, points, icon) => squadApi.addMeritCategory(profile.squadId, name, points, icon);
   const addDemeritCategory = (name, points, icon) => squadApi.addDemeritCategory(profile.squadId, name, points, icon);
+  const addCategory = (name, points, icon, isMerit) =>
+    isMerit
+      ? squadApi.addMeritCategory(profile.squadId, name, points, icon)
+      : squadApi.addDemeritCategory(profile.squadId, name, points, icon);
+  const updateCategory = (id, updates) => squadApi.updateCategory(profile.squadId, id, updates);
+  const deleteCategory = (id) => squadApi.deleteCategory(profile.squadId, id);
+  const reorderCategory = (id, newOrder) => squadApi.reorderCategory(profile.squadId, id, newOrder);
+  const loadPresetPack = (pack, replaceExisting = false) =>
+    squadApi.loadPresetPack(profile.squadId, pack, replaceExisting);
+
+  const regenerateParentCode = (cheerleaderId, name) =>
+    squadApi.regenerateParentCode(profile.squadId, cheerleaderId, name);
+
+  const bulkAwardPoints = (cheerleaderIds, category, isMerit, note = '') =>
+    squadApi.bulkAwardPoints(
+      profile.squadId,
+      cheerleaderIds,
+      category,
+      isMerit,
+      note,
+      firebaseUser.uid,
+      profile.displayName
+    );
+
+  const getTodayPointTotal = (cheerleaderId) => {
+    const today = new Date().toDateString();
+    return pointHistory
+      .filter((p) => p.cheerleaderId === cheerleaderId && new Date(p.timestamp).toDateString() === today)
+      .reduce((sum, p) => sum + p.points, 0);
+  };
+
+  // Groups
+  const addGroup = (name, icon, color) => squadApi.addGroup(profile.squadId, name, icon, color);
+  const updateGroup = (id, updates) => squadApi.updateGroup(profile.squadId, id, updates);
+  const deleteGroup = (id) => squadApi.deleteGroup(profile.squadId, id);
+  const setCheerleaderGroups = (cheerleaderId, groupIds) =>
+    squadApi.setCheerleaderGroups(profile.squadId, cheerleaderId, groupIds);
+  const setGroupMembers = (groupId, memberIds) =>
+    squadApi.setGroupMembers(profile.squadId, groupId, memberIds);
+  const getGroupMembers = (groupId) => cheerleaders.filter((c) => (c.groupIds || []).includes(groupId));
+  const getGroupsFor = (cheerleaderId) => {
+    const cheerleader = cheerleaders.find((c) => c.id === cheerleaderId);
+    if (!cheerleader) return [];
+    return groups.filter((g) => (cheerleader.groupIds || []).includes(g.id));
+  };
+
+  // Reward tiers
+  const addRewardTier = (name, icon, threshold) => squadApi.addRewardTier(profile.squadId, name, icon, threshold);
+  const updateRewardTier = (id, updates) => squadApi.updateRewardTier(profile.squadId, id, updates);
+  const deleteRewardTier = (id) => squadApi.deleteRewardTier(profile.squadId, id);
+  // rewardTiers is threshold-ascending, so the last one at or below `points` wins.
+  const getTierForPoints = (points) =>
+    rewardTiers.reduce((best, tier) => (points >= tier.threshold ? tier : best), null);
+  const getNextTier = (points) => rewardTiers.find((tier) => points < tier.threshold) || null;
+
+  // Rules
+  const squadRules = squad?.rules || defaultSquadRules;
+  const updateSquadRules = (rules) => squadApi.updateSquadRules(profile.squadId, rules);
+
+  // Seasons
+  const currentSeason = squad?.currentSeason || null;
+  const startNewSeason = (seasonName) => squadApi.startNewSeason(profile.squadId, seasonName);
+  const getSeasonEntries = (seasonId) => squadApi.getSeasonEntries(profile.squadId, seasonId);
+  const deleteArchivedSeason = (seasonId) => squadApi.deleteArchivedSeason(profile.squadId, seasonId);
 
   const value = {
     // Auth/session state
@@ -200,8 +301,14 @@ export const AppProvider = ({ children }) => {
     pointHistory,
     meritCategories,
     demeritCategories,
+    pointCategories,
     announcements,
     messages,
+    groups,
+    rewardTiers,
+    seasons,
+    squadRules,
+    currentSeason,
 
     // Auth actions
     signUpCoach,
@@ -219,11 +326,14 @@ export const AppProvider = ({ children }) => {
     addCheerleader,
     updateCheerleader,
     removeCheerleader,
+    regenerateParentCode,
 
     // Points
     awardPoints,
+    bulkAwardPoints,
     removePointEntry,
     getCheerleaderHistory,
+    getTodayPointTotal,
 
     // Announcements
     addAnnouncement,
@@ -233,10 +343,41 @@ export const AppProvider = ({ children }) => {
     sendMessage,
     getMessagesForUser,
     markMessageAsRead,
+    markThreadAsRead,
+    getUnreadCount,
 
     // Categories
     addMeritCategory,
     addDemeritCategory,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    reorderCategory,
+    loadPresetPack,
+
+    // Groups
+    addGroup,
+    updateGroup,
+    deleteGroup,
+    setCheerleaderGroups,
+    setGroupMembers,
+    getGroupMembers,
+    getGroupsFor,
+
+    // Reward tiers
+    addRewardTier,
+    updateRewardTier,
+    deleteRewardTier,
+    getTierForPoints,
+    getNextTier,
+
+    // Rules
+    updateSquadRules,
+
+    // Seasons
+    startNewSeason,
+    getSeasonEntries,
+    deleteArchivedSeason,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

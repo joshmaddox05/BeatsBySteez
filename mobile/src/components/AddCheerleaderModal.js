@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useApp } from '../contexts/AppContext';
 import { avatarOptions } from '../data/defaultCategories';
 import { colors } from '../theme/colors';
@@ -18,8 +18,9 @@ const AddCheerleaderModal = ({ onClose }) => {
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.modal}>
+          <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
           {newCheerleader ? (
             <View style={styles.successContent}>
               <Text style={styles.successIcon}>✅</Text>
@@ -81,15 +82,16 @@ const AddCheerleaderModal = ({ onClose }) => {
               </View>
             </>
           )}
+          </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  modal: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '85%' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   title: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
   closeBtn: { fontSize: 24, color: colors.textSecondary },

@@ -26,5 +26,13 @@ export const defaultDemeritCategories = [
   { id: 'uniform-violation', name: 'Uniform Violation', points: -2, icon: '👗' },
 ];
 
+// Squad-wide rules a coach can tune. Stored on the squad doc, not a subcollection,
+// because they are a handful of scalars read on every award.
+export const defaultSquadRules = {
+  allowNegativeTotals: true,
+  dailyPointCap: 0, // 0 = unlimited
+  requireNoteOnDemerits: false,
+};
+
 // Available avatars for selection
 export const avatarOptions = ['🎀', '💖', '⭐', '🌟', '💫', '🦋', '🌸', '💜', '🩷', '🎯', '🏆', '💎', '🌺', '🦄', '🎪'];
