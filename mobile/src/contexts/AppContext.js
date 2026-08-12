@@ -203,7 +203,8 @@ export const AppProvider = ({ children }) => {
   const logout = () => authApi.logout();
 
   // Cheerleader management
-  const addCheerleader = (name, avatar) => squadApi.addCheerleader(profile.squadId, name, avatar);
+  const addCheerleader = (name, avatar, extras = {}) =>
+    squadApi.addCheerleader(profile.squadId, name, avatar, extras);
   const updateCheerleader = (id, updates) => squadApi.updateCheerleader(profile.squadId, id, updates);
   const removeCheerleader = (id) => squadApi.removeCheerleader(profile.squadId, id);
 

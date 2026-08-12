@@ -141,13 +141,17 @@ export const findCheerleaderByParentCode = async (squadId, parentCode) => {
   return { id: docSnap.id, ...docSnap.data() };
 };
 
-export const addCheerleader = async (squadId, name, avatar) => {
+export const addCheerleader = async (squadId, name, avatar, extras = {}) => {
   const ref = doc(collection(db, 'squads', squadId, 'cheerleaders'));
   const cheerleader = {
     name,
     avatar,
+    position: extras.position || '',
+    notes: extras.notes || '',
+    groupIds: extras.groupIds || [],
     parentCode: randomParentCode(name),
     totalPoints: 0,
+    lifetimePoints: 0,
     createdAt: serverTimestamp(),
   };
   await setDoc(ref, cheerleader);
