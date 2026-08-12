@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useApp } from '../contexts/AppContext';
 import { colors } from '../theme/colors';
 
@@ -8,21 +18,38 @@ const PointModal = ({ cheerleader, type, onClose }) => {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [note, setNote] = useState('');
   const [awarded, setAwarded] = useState(false);
+  const [applied, setApplied] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const categories = type === 'merit' ? meritCategories : demeritCategories;
   const isMerit = type === 'merit';
 
-  const handleAward = () => {
-    if (!selectedCategory) return;
-    awardPoints(cheerleader.id, selectedCategory, isMerit, note);
-    setAwarded(true);
-    setTimeout(onClose, 1200);
+  // The squad rules can reject or trim an award, so report what actually landed
+  // rather than assuming the category's face value went through.
+  const handleAward = async () => {
+    if (!selectedCategory || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const verdict = await awardPoints(cheerleader.id, selectedCategory, isMerit, note);
+      if (!verdict?.ok) {
+        setError(verdict?.message || 'That award could not be recorded.');
+        return;
+      }
+      setApplied(verdict.applied);
+      setAwarded(true);
+      setTimeout(onClose, 1200);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.modal}>
+          <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
           {awarded ? (
             <View style={styles.awardedContent}>
               <Text style={styles.awardedIcon}>{isMerit ? '🌟' : '📝'}</Text>
@@ -30,8 +57,8 @@ const PointModal = ({ cheerleader, type, onClose }) => {
               <Text style={styles.awardedText}>
                 <Text style={{ fontWeight: '700' }}>{cheerleader.name}</Text> received{' '}
                 <Text style={{ color: isMerit ? colors.positiveText : colors.negativeText, fontWeight: '700' }}>
-                  {selectedCategory.points > 0 ? '+' : ''}
-                  {selectedCategory.points} points
+                  {applied > 0 ? '+' : ''}
+                  {applied} points
                 </Text>
               </Text>
               <Text style={styles.awardedCategory}>
@@ -80,22 +107,31 @@ const PointModal = ({ cheerleader, type, onClose }) => {
                 multiline
               />
 
+              {!!error && <Text style={styles.error}>{error}</Text>}
+
               <View style={styles.actions}>
                 <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
                   <Text style={styles.cancelBtnText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.submitBtn, { backgroundColor: isMerit ? colors.success : colors.danger }, !selectedCategory && styles.submitBtnDisabled]}
+                  style={[
+                    styles.submitBtn,
+                    { backgroundColor: isMerit ? colors.success : colors.danger },
+                    (!selectedCategory || saving) && styles.submitBtnDisabled,
+                  ]}
                   onPress={handleAward}
-                  disabled={!selectedCategory}
+                  disabled={!selectedCategory || saving}
                 >
-                  <Text style={styles.submitBtnText}>{isMerit ? 'Award Merit' : 'Give Demerit'}</Text>
+                  <Text style={styles.submitBtnText}>
+                    {saving ? 'Saving…' : isMerit ? 'Award Merit' : 'Give Demerit'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </>
           )}
+          </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -124,6 +160,7 @@ const styles = StyleSheet.create({
   catName: { fontSize: 12, color: colors.textPrimary, textAlign: 'center', marginVertical: 4 },
   label: { fontWeight: '600', color: colors.textPrimary, marginTop: 8, marginBottom: 6 },
   noteInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, minHeight: 60, textAlignVertical: 'top' },
+  error: { color: colors.negativeText, fontSize: 13, marginTop: 10 },
   actions: { flexDirection: 'row', marginTop: 16 },
   cancelBtn: { flex: 1, padding: 12, alignItems: 'center', marginRight: 8 },
   cancelBtnText: { color: colors.textSecondary, fontWeight: '600' },

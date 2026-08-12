@@ -396,7 +396,11 @@ export const AppProvider = ({ children }) => {
   // rewardTiers is threshold-ascending, so the last one at or below `points` wins.
   const getTierForPoints = (points) =>
     rewardTiers.reduce((best, tier) => (points >= tier.threshold ? tier : best), null);
-  const getNextTier = (points) => rewardTiers.find((tier) => points < tier.threshold) || null;
+  const getNextTier = (points) => {
+    const total = Number(points) || 0;
+    const next = rewardTiers.find((tier) => total < tier.threshold);
+    return next ? { tier: next, pointsAway: next.threshold - total } : null;
+  };
 
   // Rules
   const squadRules = squad?.rules || defaultSquadRules;

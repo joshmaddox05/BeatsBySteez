@@ -3,6 +3,7 @@ import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../../contexts/AppContext';
 import DashboardHeader from '../../components/DashboardHeader';
 import RecentActivity from '../../components/RecentActivity';
+import TierProgress from '../../components/TierProgress';
 import { colors } from '../../theme/colors';
 
 const MyProgressScreen = () => {
@@ -37,6 +38,7 @@ const MyProgressScreen = () => {
         <View style={styles.hero}>
           <Text style={styles.heroAvatar}>{myData.avatar}</Text>
           <Text style={styles.heroName}>{myData.name}</Text>
+          <TierProgress points={myData.totalPoints} />
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{myData.totalPoints}</Text>

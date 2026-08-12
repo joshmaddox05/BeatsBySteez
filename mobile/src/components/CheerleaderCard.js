@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useApp } from '../contexts/AppContext';
+import TierBadge from './TierBadge';
+import TierProgress from './TierProgress';
+import EditCheerleaderModal from './EditCheerleaderModal';
 import { colors } from '../theme/colors';
 
 const CheerleaderCard = ({ cheerleader, onMerit, onDemerit, isCoach }) => {
-  const { getCheerleaderHistory, removeCheerleader } = useApp();
+  const { getCheerleaderHistory, removeCheerleader, getGroupsFor } = useApp();
   const [showDetails, setShowDetails] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+
+  const memberGroups = getGroupsFor(cheerleader.id);
 
   const history = getCheerleaderHistory(cheerleader.id).slice(0, 5);
   const isPositive = cheerleader.totalPoints >= 0;
@@ -30,6 +36,16 @@ const CheerleaderCard = ({ cheerleader, onMerit, onDemerit, isCoach }) => {
             {isPositive ? '+' : ''}
             {cheerleader.totalPoints} points
           </Text>
+          <View style={styles.metaRow}>
+            <TierBadge points={cheerleader.totalPoints} size="sm" />
+            {memberGroups.map((group) => (
+              <View key={group.id} style={[styles.groupChip, group.color ? { borderColor: group.color } : null]}>
+                <Text style={styles.groupChipText}>
+                  {group.icon} {group.name}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
         {isCoach && (
           <View style={styles.quickActions}>
@@ -45,6 +61,12 @@ const CheerleaderCard = ({ cheerleader, onMerit, onDemerit, isCoach }) => {
 
       {showDetails && (
         <View style={styles.details}>
+          <TierProgress points={cheerleader.totalPoints} />
+
+          {!!cheerleader.position && (
+            <Text style={styles.position}>Position: {cheerleader.position}</Text>
+          )}
+
           <Text style={styles.detailsTitle}>Recent Activity</Text>
           {history.length > 0 ? (
             history.map((entry) => (
@@ -66,15 +88,24 @@ const CheerleaderCard = ({ cheerleader, onMerit, onDemerit, isCoach }) => {
               <Text style={styles.parentCode}>
                 Parent Code: <Text style={styles.parentCodeValue}>{cheerleader.parentCode}</Text>
               </Text>
-              <TouchableOpacity
-                style={[styles.deleteBtn, confirmDelete && styles.deleteBtnConfirm]}
-                onPress={handleDelete}
-              >
-                <Text style={styles.deleteBtnText}>{confirmDelete ? 'Click to Confirm' : 'Remove'}</Text>
-              </TouchableOpacity>
+              <View style={styles.footerActions}>
+                <TouchableOpacity style={styles.editBtn} onPress={() => setShowEdit(true)}>
+                  <Text style={styles.editBtnText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.deleteBtn, confirmDelete && styles.deleteBtnConfirm]}
+                  onPress={handleDelete}
+                >
+                  <Text style={styles.deleteBtnText}>{confirmDelete ? 'Tap to Confirm' : 'Remove'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
+      )}
+
+      {showEdit && (
+        <EditCheerleaderModal cheerleader={cheerleader} onClose={() => setShowEdit(false)} />
       )}
     </View>
   );
@@ -129,6 +160,28 @@ const styles = StyleSheet.create({
   deleteBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.negativeBg },
   deleteBtnConfirm: { backgroundColor: colors.danger },
   deleteBtnText: { color: colors.negativeText, fontWeight: '600', fontSize: 12 },
+  footerActions: { flexDirection: 'row', alignItems: 'center' },
+  editBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginRight: 8,
+  },
+  editBtnText: { color: colors.textSecondary, fontWeight: '600', fontSize: 12 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 4 },
+  groupChip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 6,
+    marginTop: 2,
+  },
+  groupChipText: { fontSize: 10, color: colors.textSecondary, fontWeight: '600' },
+  position: { color: colors.textSecondary, fontSize: 12, marginTop: 8 },
 });
 
 export default CheerleaderCard;
