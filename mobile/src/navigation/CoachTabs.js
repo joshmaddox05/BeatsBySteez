@@ -6,6 +6,7 @@ import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ActivityScreen from '../screens/coach/ActivityScreen';
 import AnnouncementsScreen from '../screens/AnnouncementsScreen';
 import SettingsScreen from '../screens/coach/SettingsScreen';
+import MessagesScreen from '../screens/coach/MessagesScreen';
 import { colors } from '../theme/colors';
 
 const Tab = createBottomTabNavigator();
@@ -15,6 +16,7 @@ const icons = {
   Leaderboard: '🏆',
   Activity: '📋',
   Announcements: '📢',
+  Messages: '📬',
   Settings: '⚙️',
 };
 
@@ -31,6 +33,7 @@ const CoachTabs = () => (
     <Tab.Screen name="Leaderboard" component={LeaderboardScreen} />
     <Tab.Screen name="Activity" component={ActivityScreen} />
     <Tab.Screen name="Announcements" component={AnnouncementsScreen} />
+    <Tab.Screen name="Messages" component={MessagesScreen} />
     <Tab.Screen name="Settings" component={SettingsScreen} />
   </Tab.Navigator>
 );
