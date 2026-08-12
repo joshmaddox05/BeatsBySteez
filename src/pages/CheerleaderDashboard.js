@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import RecentActivity from '../components/RecentActivity';
 import AnnouncementSection from '../components/AnnouncementSection';
+import TierBadge from '../components/TierBadge';
+import TierProgress from '../components/TierProgress';
 
 const CheerleaderDashboard = () => {
   const navigate = useNavigate();
@@ -10,7 +12,8 @@ const CheerleaderDashboard = () => {
     currentUser,
     logout,
     cheerleaders,
-    getCheerleaderHistory
+    getCheerleaderHistory,
+    currentSeason
   } = useApp();
 
   const [activeTab, setActiveTab] = useState('myProgress');
@@ -23,19 +26,25 @@ const CheerleaderDashboard = () => {
   // Get current cheerleader data
   const myData = cheerleaders.find(c => c.id === currentUser?.id);
   const myHistory = getCheerleaderHistory(currentUser?.id || '');
+  // Totals shown next to "Total Points" have to cover the same span that
+  // totalPoints does, or a season reset leaves them contradicting each other.
+  const seasonHistory = myHistory.filter(h => h.seasonId === currentSeason.id);
 
   // Calculate stats
-  const totalMerits = myHistory.filter(h => h.isMerit).reduce((sum, h) => sum + h.points, 0);
-  const totalDemerits = myHistory.filter(h => !h.isMerit).reduce((sum, h) => sum + h.points, 0);
-  const thisWeekHistory = myHistory.filter(h => {
+  const totalMerits = seasonHistory.filter(h => h.isMerit).reduce((sum, h) => sum + (h.points || 0), 0);
+  const totalDemerits = seasonHistory.filter(h => !h.isMerit).reduce((sum, h) => sum + (h.points || 0), 0);
+  const thisWeekHistory = seasonHistory.filter(h => {
     const entryDate = new Date(h.timestamp);
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
     return entryDate >= weekAgo;
   });
+  const weekChange = thisWeekHistory.reduce((sum, h) => sum + (h.points || 0), 0);
 
   // Get ranking
-  const sortedCheerleaders = [...cheerleaders].sort((a, b) => b.totalPoints - a.totalPoints);
+  const sortedCheerleaders = [...cheerleaders].sort(
+    (a, b) => (b.totalPoints || 0) - (a.totalPoints || 0)
+  );
   const myRank = sortedCheerleaders.findIndex(c => c.id === currentUser?.id) + 1;
 
   if (!myData) {
@@ -67,9 +76,10 @@ const CheerleaderDashboard = () => {
       <div className="profile-hero">
         <div className="hero-avatar">{myData.avatar}</div>
         <h2>{myData.name}</h2>
+        <TierProgress points={myData.totalPoints ?? 0} />
         <div className="hero-stats">
           <div className="stat-item total">
-            <span className="stat-value">{myData.totalPoints}</span>
+            <span className="stat-value">{myData.totalPoints ?? 0}</span>
             <span className="stat-label">Total Points</span>
           </div>
           <div className="stat-item rank">
@@ -119,9 +129,9 @@ const CheerleaderDashboard = () => {
                 </p>
                 <p>
                   Points change:{' '}
-                  <span className={thisWeekHistory.reduce((sum, h) => sum + h.points, 0) >= 0 ? 'positive' : 'negative'}>
-                    {thisWeekHistory.reduce((sum, h) => sum + h.points, 0) >= 0 ? '+' : ''}
-                    {thisWeekHistory.reduce((sum, h) => sum + h.points, 0)}
+                  <span className={weekChange >= 0 ? 'positive' : 'negative'}>
+                    {weekChange >= 0 ? '+' : ''}
+                    {weekChange}
                   </span>
                 </p>
               </div>
@@ -157,9 +167,10 @@ const CheerleaderDashboard = () => {
                   <span className="name">
                     {cheerleader.name}
                     {cheerleader.id === currentUser?.id && ' (You)'}
+                    <TierBadge points={cheerleader.totalPoints ?? 0} size="sm" />
                   </span>
-                  <span className={`points ${cheerleader.totalPoints >= 0 ? 'positive' : 'negative'}`}>
-                    {cheerleader.totalPoints >= 0 ? '+' : ''}{cheerleader.totalPoints} pts
+                  <span className={`points ${(cheerleader.totalPoints ?? 0) >= 0 ? 'positive' : 'negative'}`}>
+                    {(cheerleader.totalPoints ?? 0) >= 0 ? '+' : ''}{cheerleader.totalPoints ?? 0} pts
                   </span>
                 </div>
               ))}

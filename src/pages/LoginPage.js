@@ -149,9 +149,16 @@ const LoginPage = () => {
           </div>
         )}
 
-        <div className="demo-info">
-          <p><strong>Demo Parent Codes:</strong> EMMA2024, SOPHIA2024, OLIVIA2024, AVA2024, ISABELLA2024</p>
-        </div>
+        {/* Read off the live roster — codes change when the coach adds a
+            cheerleader or regenerates one. */}
+        {cheerleaders.length > 0 && (
+          <div className="demo-info">
+            <p>
+              <strong>Parent Codes:</strong>{' '}
+              {cheerleaders.map(c => c.parentCode).join(', ')}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
