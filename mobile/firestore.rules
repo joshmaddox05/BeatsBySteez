@@ -14,9 +14,12 @@ service cloud.firestore {
       return isSignedIn() && myProfile().squadId == squadId;
     }
 
+    // A squad can have more than one coach (the founder plus any assistant
+    // coaches who joined with the coach invite code) — coach status is
+    // membership in this subcollection, not a single coachId field.
     function isCoachOfSquad(squadId) {
       return isSignedIn() &&
-        get(/databases/$(database)/documents/squads/$(squadId)).data.coachId == request.auth.uid;
+        exists(/databases/$(database)/documents/squads/$(squadId)/coaches/$(request.auth.uid));
     }
 
     // A user's own profile: role, squadId, linkedCheerleaderId. Only the owner can read/write it.
@@ -30,6 +33,37 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isSignedIn() && request.resource.data.coachId == request.auth.uid;
       allow update, delete: if isCoachOfSquad(squadId);
+
+      match /coaches/{uid} {
+        allow read: if true;
+        // Two ways to claim your own coach doc: you're the squad's founding
+        // coachId (also used to self-heal squads created before this
+        // subcollection existed), or you're presenting the squad's current
+        // coachInviteCode as an assistant coach. Nobody can grant coach
+        // status to anyone but themselves, and nobody can grant it to
+        // themselves without knowing (or already being) the real thing.
+        allow create: if isSignedIn() && request.auth.uid == uid && (
+          get(/databases/$(database)/documents/squads/$(squadId)).data.coachId == request.auth.uid ||
+          get(/databases/$(database)/documents/squads/$(squadId)).data.coachInviteCode == request.resource.data.inviteCode
+        );
+      }
+
+      // Directory of every signed-up participant (coach, parents, cheerleaders),
+      // used to build the "message these people" picker. Squad-only read, since
+      // it exposes real display names — unlike the public roster/groups below,
+      // which only ever show cheerleader names the join flow already needs.
+      match /members/{uid} {
+        allow read: if inSquad(squadId);
+        allow create, update: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      // Custom threads: a hand-picked set of people, not tied to a squad group.
+      match /threads/{threadId} {
+        allow read: if inSquad(squadId) && request.auth.uid in resource.data.memberIds;
+        allow create: if inSquad(squadId) &&
+          request.auth.uid in request.resource.data.memberIds &&
+          request.resource.data.createdBy == request.auth.uid;
+      }
 
       match /cheerleaders/{cheerleaderId} {
         // Public read: the join flow lists roster names/avatars so a cheerleader/parent can

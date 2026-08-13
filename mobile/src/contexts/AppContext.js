@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import * as authApi from '../firebase/auth';
 import * as squadApi from '../firebase/squad';
@@ -35,6 +35,8 @@ export const AppProvider = ({ children }) => {
   const [rewardTiers, setRewardTiers] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [events, setEvents] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [customThreads, setCustomThreads] = useState([]);
 
   // Auth state
   useEffect(() => {
@@ -70,12 +72,13 @@ export const AppProvider = ({ children }) => {
     return unsubscribe;
   }, [profile?.squadId]);
 
-  // Backfill defaults onto squads created before groups/tiers/seasons existed.
-  // Coach-only: firestore.rules restrict these writes to the squad's coach.
+  // Backfill defaults onto squads created before groups/tiers/seasons/coaches
+  // existed. Coach-only: firestore.rules restrict these writes to the squad's
+  // coach (or, for the coaches/{uid} bootstrap doc, the squad's own coachId).
   useEffect(() => {
     if (!profile?.squadId || profile.role !== 'coach') return;
-    squadApi.ensureSquadDefaults(profile.squadId).catch(() => {});
-  }, [profile?.squadId, profile?.role]);
+    squadApi.ensureSquadDefaults(profile.squadId, profile.displayName).catch(() => {});
+  }, [profile?.squadId, profile?.role, profile?.displayName]);
 
   // Squad sub-collections
   useEffect(() => {
@@ -91,6 +94,8 @@ export const AppProvider = ({ children }) => {
       setRewardTiers([]);
       setSeasons([]);
       setEvents([]);
+      setMembers([]);
+      setCustomThreads([]);
       return undefined;
     }
 
@@ -169,6 +174,26 @@ export const AppProvider = ({ children }) => {
       );
     });
 
+    const unsubMembers = onSnapshot(collection(db, 'squads', squadId, 'members'), (snap) => {
+      setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+
+    // Filtered server-side (not just client-side) with array-contains: the
+    // threads/{threadId} read rule checks resource.data.memberIds, and
+    // Firestore rejects an entire unfiltered list query outright when the
+    // rule can't be proven true for every possible result up front.
+    const unsubThreads = onSnapshot(
+      query(collection(db, 'squads', squadId, 'threads'), where('memberIds', 'array-contains', firebaseUser.uid)),
+      (snap) => {
+        setCustomThreads(
+          snap.docs.map((d) => {
+            const data = d.data();
+            return { id: d.id, ...data, createdAt: toIsoString(data.createdAt) };
+          })
+        );
+      }
+    );
+
     return () => {
       unsubCheerleaders();
       unsubHistory();
@@ -179,8 +204,10 @@ export const AppProvider = ({ children }) => {
       unsubTiers();
       unsubSeasons();
       unsubEvents();
+      unsubMembers();
+      unsubThreads();
     };
-  }, [profile?.squadId]);
+  }, [profile?.squadId, firebaseUser?.uid]);
 
   const currentUser = useMemo(() => {
     if (!firebaseUser || !profile) return null;
@@ -205,6 +232,9 @@ export const AppProvider = ({ children }) => {
   // Auth actions
   const signUpCoach = (email, password, displayName, squadName) =>
     authApi.signUpCoach(email, password, displayName, squadName);
+
+  const joinAsCoach = (email, password, displayName, squadId, coachInviteCode) =>
+    authApi.joinAsCoach(email, password, displayName, squadId, coachInviteCode);
 
   const signUpCheerleaderAccount = (email, password, displayName, squadId, linkedCheerleaderId) =>
     authApi.signUpCheerleader(email, password, displayName, squadId, linkedCheerleaderId);
@@ -388,9 +418,25 @@ export const AppProvider = ({ children }) => {
   const markGroupThreadAsRead = (groupId) =>
     squadApi.markGroupThreadAsRead(profile.squadId, groupId, firebaseUser.uid);
 
+  // Custom threads: a hand-picked set of people, not tied to a squad group —
+  // the "message these specific people" case. `participants` is [{ uid, name }],
+  // not including the caller (the caller is added on the backend).
+  const createCustomThread = (participants) => {
+    const memberIds = participants.map((p) => p.uid);
+    const memberNames = participants.reduce((acc, p) => ({ ...acc, [p.uid]: p.name }), {
+      [firebaseUser.uid]: profile.displayName,
+    });
+    return squadApi.createCustomThread(profile.squadId, firebaseUser.uid, memberIds, memberNames);
+  };
+  const sendThreadMessage = (threadId, content) =>
+    squadApi.sendThreadMessage(profile.squadId, threadId, firebaseUser.uid, profile.displayName, profile.role, content);
+  const markCustomThreadAsRead = (threadId) =>
+    squadApi.markCustomThreadAsRead(profile.squadId, threadId, firebaseUser.uid);
+
   // Only meaningful for the signed-in user (the only id every call site ever
-  // passes) — a boolean `read` can't tell us group-message state for anyone
-  // else, since a group message is "read" independently by each recipient.
+  // passes) — a boolean `read` can't tell us group/custom-thread message
+  // state for anyone else, since those are "read" independently by each
+  // recipient.
   const getUnreadCount = (userId) => {
     const direct = messages.filter((m) => m.toId === userId && !m.read).length;
     if (userId !== currentUser?.id) return direct;
@@ -403,7 +449,13 @@ export const AppProvider = ({ children }) => {
     const group = messages.filter(
       (m) => m.groupId && myGroupIds.includes(m.groupId) && m.fromId !== userId && !(m.readBy || []).includes(userId)
     ).length;
-    return direct + group;
+
+    const myThreadIds = customThreads.filter((t) => (t.memberIds || []).includes(userId)).map((t) => t.id);
+    const custom = messages.filter(
+      (m) => m.threadId && myThreadIds.includes(m.threadId) && m.fromId !== userId && !(m.readBy || []).includes(userId)
+    ).length;
+
+    return direct + group + custom;
   };
 
   // Categories
@@ -529,9 +581,12 @@ export const AppProvider = ({ children }) => {
     squadRules,
     currentSeason,
     events,
+    members,
+    customThreads,
 
     // Auth actions
     signUpCoach,
+    joinAsCoach,
     signUpCheerleaderAccount,
     signUpParentAccount,
     signIn,
@@ -539,6 +594,7 @@ export const AppProvider = ({ children }) => {
 
     // Squad join helpers (re-exported for screens)
     resolveInviteCode: squadApi.resolveInviteCode,
+    resolveCoachInviteCode: squadApi.resolveCoachInviteCode,
     listCheerleaders: squadApi.listCheerleaders,
     findCheerleaderByParentCode: squadApi.findCheerleaderByParentCode,
 
@@ -572,6 +628,9 @@ export const AppProvider = ({ children }) => {
     getUnreadCount,
     sendGroupMessage,
     markGroupThreadAsRead,
+    createCustomThread,
+    sendThreadMessage,
+    markCustomThreadAsRead,
 
     // Categories
     addMeritCategory,

@@ -99,6 +99,14 @@ const SquadScreen = () => {
               </View>
             )}
 
+            {!!squad?.coachInviteCode && (
+              <View style={[styles.inviteBanner, styles.coachInviteBanner]}>
+                <Text style={styles.inviteLabel}>Coach Invite Code</Text>
+                <Text style={[styles.inviteCode, styles.coachInviteCode]}>{squad.coachInviteCode}</Text>
+                <Text style={styles.inviteHint}>Share this only with an assistant coach you trust</Text>
+              </View>
+            )}
+
             <SquadToolbar
               search={search}
               onSearch={setSearch}
@@ -189,6 +197,8 @@ const styles = StyleSheet.create({
   inviteLabel: { color: colors.textSecondary, fontSize: 12 },
   inviteCode: { fontSize: 20, fontWeight: '800', color: colors.primary, letterSpacing: 2 },
   inviteHint: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  coachInviteBanner: { backgroundColor: '#fff7ed' },
+  coachInviteCode: { color: colors.warning },
   list: { paddingHorizontal: 12, paddingBottom: 24 },
   sectionHeader: {
     flexDirection: 'row',

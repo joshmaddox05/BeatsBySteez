@@ -20,7 +20,7 @@ import { defaultRewardTiers } from '../data/defaultRewardTiers';
 
 // Bump when a new default collection or squad field is introduced, so existing
 // squads pick it up on next load.
-const SQUAD_DEFAULTS_VERSION = 2;
+const SQUAD_DEFAULTS_VERSION = 3;
 
 const randomInviteCode = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -36,19 +36,43 @@ const randomParentCode = (name) => {
   return `${first}${Math.floor(1000 + Math.random() * 9000)}`;
 };
 
-export const createSquad = async (coachUid, squadName) => {
+// Public roster of every signed-up participant in a squad (coach, parents,
+// cheerleaders), used to build the "message these people" picker. Separate
+// from `users/{uid}` (which only its owner can read) and from `coaches/{uid}`
+// (which is auth-only, not a display roster).
+export const addMember = (squadId, uid, role, displayName, linkedCheerleaderId = null) =>
+  setDoc(doc(db, 'squads', squadId, 'members', uid), {
+    uid,
+    role,
+    displayName,
+    linkedCheerleaderId,
+    joinedAt: serverTimestamp(),
+  });
+
+export const createSquad = async (coachUid, squadName, displayName) => {
   const squadRef = doc(collection(db, 'squads'));
   const inviteCode = randomInviteCode();
+  const coachInviteCode = randomInviteCode();
 
   await setDoc(squadRef, {
     name: squadName,
     coachId: coachUid,
     inviteCode,
+    coachInviteCode,
     rules: defaultSquadRules,
     currentSeason: { id: `season-${Date.now()}`, name: 'Season 1', startedAt: new Date().toISOString() },
     defaultsVersion: SQUAD_DEFAULTS_VERSION,
     createdAt: serverTimestamp(),
   });
+
+  // Two separate writes, not one batch: the coaches/{uid} create rule reads
+  // squads/{squadId}.coachId via get(), and get() inside a rule only sees
+  // already-committed data — it can't see another write in the same batch.
+  await setDoc(doc(db, 'squads', squadRef.id, 'coaches', coachUid), {
+    uid: coachUid,
+    joinedAt: serverTimestamp(),
+  });
+  await addMember(squadRef.id, coachUid, 'coach', displayName);
 
   const batch = writeBatch(db);
   defaultMeritCategories.forEach((category, i) => {
@@ -69,19 +93,60 @@ export const createSquad = async (coachUid, squadName) => {
   });
   await batch.commit();
 
-  return { squadId: squadRef.id, inviteCode };
+  return { squadId: squadRef.id, inviteCode, coachInviteCode };
 };
 
-// Squads created before groups/tiers/seasons existed have none of those docs.
-// Backfills them once, guarded by defaultsVersion so a coach opening the app on
-// two devices cannot seed twice.
-export const ensureSquadDefaults = async (squadId) => {
+// An assistant coach joins an existing squad. The coaches/{uid} create rule
+// only allows this when `coachInviteCode` matches what's stored on the squad
+// doc, so knowing the squad's id alone isn't enough to grant coach access.
+export const resolveCoachInviteCode = async (coachInviteCode) => {
+  const q = query(
+    collection(db, 'squads'),
+    where('coachInviteCode', '==', coachInviteCode.trim().toUpperCase())
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  const docSnap = snap.docs[0];
+  return { id: docSnap.id, ...docSnap.data() };
+};
+
+export const joinSquadAsCoach = async (squadId, uid, coachInviteCode, displayName) => {
+  await setDoc(doc(db, 'squads', squadId, 'coaches', uid), {
+    uid,
+    inviteCode: coachInviteCode.trim().toUpperCase(),
+    joinedAt: serverTimestamp(),
+  });
+  await addMember(squadId, uid, 'coach', displayName);
+};
+
+// Squads created before groups/tiers/seasons/coaches existed have none of
+// those docs. Backfills them once, guarded by defaultsVersion so a coach
+// opening the app on two devices cannot seed twice.
+//
+// `coachDisplayName` backfills the legacy coach's own member roster entry —
+// pass the signed-in coach's own profile name, since this only ever runs as
+// that coach and nothing else can read it back out of `users/{uid}`.
+export const ensureSquadDefaults = async (squadId, coachDisplayName) => {
   const squadRef = doc(db, 'squads', squadId);
   const squadSnap = await getDoc(squadRef);
   if (!squadSnap.exists()) return;
 
   const data = squadSnap.data();
   if ((data.defaultsVersion || 0) >= SQUAD_DEFAULTS_VERSION) return;
+
+  // Must happen before the batch below: until coaches/{coachId} exists,
+  // isCoachOfSquad() is false and the squad-doc update in the batch (rules:
+  // isCoachOfSquad) would be rejected. The bootstrap branch of the
+  // coaches/{uid} create rule (squad.coachId == request.auth.uid) doesn't
+  // depend on that, so it's always available to the real founding coach.
+  const coachDocSnap = await getDoc(doc(db, 'squads', squadId, 'coaches', data.coachId));
+  if (!coachDocSnap.exists()) {
+    await setDoc(doc(db, 'squads', squadId, 'coaches', data.coachId), {
+      uid: data.coachId,
+      joinedAt: serverTimestamp(),
+    });
+  }
+  await addMember(squadId, data.coachId, 'coach', coachDisplayName || 'Coach');
 
   const [groupsSnap, tiersSnap] = await Promise.all([
     getDocs(collection(db, 'squads', squadId, 'groups')),
@@ -113,6 +178,7 @@ export const ensureSquadDefaults = async (squadId) => {
       startedAt: new Date().toISOString(),
     };
   }
+  if (!data.coachInviteCode) patch.coachInviteCode = randomInviteCode();
   batch.set(squadRef, patch, { merge: true });
 
   await batch.commit();
@@ -328,6 +394,50 @@ export const sendGroupMessage = async (squadId, groupId, groupName, fromId, from
 
 export const markGroupThreadAsRead = async (squadId, groupId, myId) => {
   const q = query(collection(db, 'squads', squadId, 'messages'), where('groupId', '==', groupId));
+  const snap = await getDocs(q);
+  const batch = writeBatch(db);
+  snap.docs.forEach((d) => {
+    if (!(d.data().readBy || []).includes(myId)) {
+      batch.set(d.ref, { readBy: arrayUnion(myId) }, { merge: true });
+    }
+  });
+  await batch.commit();
+};
+
+// Custom threads are a hand-picked set of people (any mix of coach, parents,
+// cheerleaders) that isn't tied to an existing squad group — the "message
+// these specific people" case. `memberNames` is denormalized onto the thread
+// doc so the inbox can render a title without extra reads.
+export const createCustomThread = async (squadId, creatorUid, memberIds, memberNames) => {
+  const ref = doc(collection(db, 'squads', squadId, 'threads'));
+  const data = {
+    memberIds: [...new Set([...memberIds, creatorUid])],
+    memberNames,
+    createdBy: creatorUid,
+    createdAt: serverTimestamp(),
+  };
+  await setDoc(ref, data);
+  return { id: ref.id, ...data };
+};
+
+export const sendThreadMessage = async (squadId, threadId, fromId, fromName, fromRole, content) => {
+  const ref = doc(collection(db, 'squads', squadId, 'messages'));
+  const message = {
+    fromId,
+    fromName,
+    fromRole,
+    toId: null,
+    threadId,
+    content,
+    timestamp: serverTimestamp(),
+    readBy: [fromId],
+  };
+  await setDoc(ref, message);
+  return { id: ref.id, ...message };
+};
+
+export const markCustomThreadAsRead = async (squadId, threadId, myId) => {
+  const q = query(collection(db, 'squads', squadId, 'messages'), where('threadId', '==', threadId));
   const snap = await getDocs(q);
   const batch = writeBatch(db);
   snap.docs.forEach((d) => {
