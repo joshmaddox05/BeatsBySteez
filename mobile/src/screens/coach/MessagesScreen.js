@@ -13,7 +13,7 @@ const MessagesScreen = () => {
     <SafeAreaView style={styles.safe}>
       <DashboardHeader
         title="Messages"
-        subtitle={unread > 0 ? `${unread} unread` : 'From parents and cheerleaders'}
+        subtitle={unread > 0 ? `${unread} unread` : 'Direct messages and group threads'}
       />
       <MessageInbox />
     </SafeAreaView>

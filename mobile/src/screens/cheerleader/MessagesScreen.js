@@ -5,7 +5,7 @@ import DashboardHeader from '../../components/DashboardHeader';
 import MessageInbox from '../../components/MessageInbox';
 import { colors } from '../../theme/colors';
 
-const ContactScreen = () => {
+const MessagesScreen = () => {
   const { currentUser, getUnreadCount } = useApp();
   const unread = getUnreadCount(currentUser?.id);
 
@@ -13,7 +13,7 @@ const ContactScreen = () => {
     <SafeAreaView style={styles.safe}>
       <DashboardHeader
         title="✉️ Messages"
-        subtitle={unread > 0 ? `${unread} unread` : 'The coach and your child’s group'}
+        subtitle={unread > 0 ? `${unread} unread` : 'The coach and your group'}
       />
       <MessageInbox />
     </SafeAreaView>
@@ -24,4 +24,4 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
 });
 
-export default ContactScreen;
+export default MessagesScreen;

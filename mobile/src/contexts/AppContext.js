@@ -34,6 +34,7 @@ export const AppProvider = ({ children }) => {
   const [groups, setGroups] = useState([]);
   const [rewardTiers, setRewardTiers] = useState([]);
   const [seasons, setSeasons] = useState([]);
+  const [events, setEvents] = useState([]);
 
   // Auth state
   useEffect(() => {
@@ -89,6 +90,7 @@ export const AppProvider = ({ children }) => {
       setGroups([]);
       setRewardTiers([]);
       setSeasons([]);
+      setEvents([]);
       return undefined;
     }
 
@@ -156,6 +158,17 @@ export const AppProvider = ({ children }) => {
       }
     );
 
+    const unsubEvents = onSnapshot(collection(db, 'squads', squadId, 'events'), (snap) => {
+      setEvents(
+        snap.docs
+          .map((d) => {
+            const data = d.data();
+            return { id: d.id, ...data, createdAt: toIsoString(data.createdAt) };
+          })
+          .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')))
+      );
+    });
+
     return () => {
       unsubCheerleaders();
       unsubHistory();
@@ -165,6 +178,7 @@ export const AppProvider = ({ children }) => {
       unsubGroups();
       unsubTiers();
       unsubSeasons();
+      unsubEvents();
     };
   }, [profile?.squadId]);
 
@@ -344,6 +358,11 @@ export const AppProvider = ({ children }) => {
     squadApi.addAnnouncement(profile.squadId, title, content, firebaseUser.uid, profile.displayName);
   const removeAnnouncement = (id) => squadApi.removeAnnouncement(profile.squadId, id);
 
+  // Team calendar (lives alongside announcements)
+  const addEvent = (event) => squadApi.addEvent(profile.squadId, event, firebaseUser.uid, profile.displayName);
+  const updateEvent = (id, updates) => squadApi.updateEvent(profile.squadId, id, updates);
+  const removeEvent = (id) => squadApi.removeEvent(profile.squadId, id);
+
   // Messages
   const sendMessage = (toId, content) =>
     squadApi.sendMessage(profile.squadId, firebaseUser.uid, profile.displayName, profile.role, toId, content);
@@ -351,7 +370,41 @@ export const AppProvider = ({ children }) => {
   const markMessageAsRead = (messageId) => squadApi.markMessageAsRead(profile.squadId, messageId);
 
   const markThreadAsRead = (otherId) => squadApi.markThreadAsRead(profile.squadId, firebaseUser.uid, otherId);
-  const getUnreadCount = (userId) => messages.filter((m) => m.toId === userId && !m.read).length;
+
+  // Group threads: one per squad group (Varsity, JV, ...), open to the coach
+  // and every parent/cheerleader linked to a member of that group.
+  const sendGroupMessage = (groupId, content) => {
+    const group = groups.find((g) => g.id === groupId);
+    return squadApi.sendGroupMessage(
+      profile.squadId,
+      groupId,
+      group?.name || 'Group',
+      firebaseUser.uid,
+      profile.displayName,
+      profile.role,
+      content
+    );
+  };
+  const markGroupThreadAsRead = (groupId) =>
+    squadApi.markGroupThreadAsRead(profile.squadId, groupId, firebaseUser.uid);
+
+  // Only meaningful for the signed-in user (the only id every call site ever
+  // passes) — a boolean `read` can't tell us group-message state for anyone
+  // else, since a group message is "read" independently by each recipient.
+  const getUnreadCount = (userId) => {
+    const direct = messages.filter((m) => m.toId === userId && !m.read).length;
+    if (userId !== currentUser?.id) return direct;
+
+    const linkedId = currentUser?.childId || currentUser?.cheerleaderId;
+    const myGroupIds =
+      userRole === 'coach'
+        ? groups.map((g) => g.id)
+        : cheerleaders.find((c) => c.id === linkedId)?.groupIds || [];
+    const group = messages.filter(
+      (m) => m.groupId && myGroupIds.includes(m.groupId) && m.fromId !== userId && !(m.readBy || []).includes(userId)
+    ).length;
+    return direct + group;
+  };
 
   // Categories
   const addMeritCategory = (name, points, icon) =>
@@ -475,6 +528,7 @@ export const AppProvider = ({ children }) => {
     seasons,
     squadRules,
     currentSeason,
+    events,
 
     // Auth actions
     signUpCoach,
@@ -505,12 +559,19 @@ export const AppProvider = ({ children }) => {
     addAnnouncement,
     removeAnnouncement,
 
+    // Team calendar
+    addEvent,
+    updateEvent,
+    removeEvent,
+
     // Messages
     sendMessage,
     getMessagesForUser,
     markMessageAsRead,
     markThreadAsRead,
     getUnreadCount,
+    sendGroupMessage,
+    markGroupThreadAsRead,
 
     // Categories
     addMeritCategory,

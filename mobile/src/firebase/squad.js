@@ -1,5 +1,6 @@
 import {
   addDoc,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -246,6 +247,31 @@ export const addAnnouncement = async (squadId, title, content, authorUid, author
 export const removeAnnouncement = (squadId, announcementId) =>
   deleteDoc(doc(db, 'squads', squadId, 'announcements', announcementId));
 
+// Calendar events live in the announcements area but their own subcollection,
+// since they have their own shape (date/time/location) instead of free text.
+export const addEvent = async (squadId, event, authorUid, authorName) => {
+  const ref = doc(collection(db, 'squads', squadId, 'events'));
+  const data = {
+    title: event.title,
+    description: event.description || '',
+    date: event.date,
+    time: event.time || '',
+    location: event.location || '',
+    icon: event.icon || '📅',
+    authorId: authorUid,
+    authorName,
+    createdAt: serverTimestamp(),
+  };
+  await setDoc(ref, data);
+  return { id: ref.id, ...data };
+};
+
+export const updateEvent = (squadId, eventId, updates) =>
+  setDoc(doc(db, 'squads', squadId, 'events', eventId), updates, { merge: true });
+
+export const removeEvent = (squadId, eventId) =>
+  deleteDoc(doc(db, 'squads', squadId, 'events', eventId));
+
 export const sendMessage = async (squadId, fromId, fromName, fromRole, toId, content) => {
   const ref = doc(collection(db, 'squads', squadId, 'messages'));
   const message = {
@@ -274,6 +300,40 @@ export const markThreadAsRead = async (squadId, myId, otherId) => {
   const batch = writeBatch(db);
   snap.docs.forEach((d) => {
     if (!d.data().read) batch.set(d.ref, { read: true }, { merge: true });
+  });
+  await batch.commit();
+};
+
+// Group threads are keyed off an existing squad group (Varsity, JV, ...)
+// rather than a separate collection, so membership always matches whoever
+// the coach currently has in that group. Every participant can see who else
+// is in the thread has read a message, since a boolean `read` flag can't
+// represent "read by some of several recipients".
+export const sendGroupMessage = async (squadId, groupId, groupName, fromId, fromName, fromRole, content) => {
+  const ref = doc(collection(db, 'squads', squadId, 'messages'));
+  const message = {
+    fromId,
+    fromName,
+    fromRole,
+    toId: null,
+    groupId,
+    groupName,
+    content,
+    timestamp: serverTimestamp(),
+    readBy: [fromId],
+  };
+  await setDoc(ref, message);
+  return { id: ref.id, ...message };
+};
+
+export const markGroupThreadAsRead = async (squadId, groupId, myId) => {
+  const q = query(collection(db, 'squads', squadId, 'messages'), where('groupId', '==', groupId));
+  const snap = await getDocs(q);
+  const batch = writeBatch(db);
+  snap.docs.forEach((d) => {
+    if (!(d.data().readBy || []).includes(myId)) {
+      batch.set(d.ref, { readBy: arrayUnion(myId) }, { merge: true });
+    }
   });
   await batch.commit();
 };

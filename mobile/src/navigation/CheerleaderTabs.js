@@ -4,11 +4,12 @@ import { Text } from 'react-native';
 import MyProgressScreen from '../screens/cheerleader/MyProgressScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AnnouncementsScreen from '../screens/AnnouncementsScreen';
+import MessagesScreen from '../screens/cheerleader/MessagesScreen';
 import { colors } from '../theme/colors';
 
 const Tab = createBottomTabNavigator();
 
-const icons = { 'My Progress': '📊', Leaderboard: '🏆', Announcements: '📢' };
+const icons = { 'My Progress': '📊', Leaderboard: '🏆', Announcements: '📢', Messages: '📬' };
 
 const CheerleaderTabs = () => (
   <Tab.Navigator
@@ -22,6 +23,7 @@ const CheerleaderTabs = () => (
     <Tab.Screen name="My Progress" component={MyProgressScreen} />
     <Tab.Screen name="Leaderboard" component={LeaderboardScreen} />
     <Tab.Screen name="Announcements" component={AnnouncementsScreen} />
+    <Tab.Screen name="Messages" component={MessagesScreen} />
   </Tab.Navigator>
 );
 

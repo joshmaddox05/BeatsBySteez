@@ -23,28 +23,53 @@ const formatTime = (iso) => {
   });
 };
 
-// Web keys threads off a hardcoded 'coach' id; here every participant is a real
-// Firebase uid, so "me" is whoever is signed in and the counterpart is the
-// other uid on the message.
+// Two kinds of thread share this list: direct (one other uid) and group (one
+// squad group, open to the coach plus everyone linked to a member of it).
+// Group membership is derived from the squad's groups/cheerleaders, not a
+// separate collection, so it always matches whoever the coach currently has
+// in that group.
 const MessageInbox = () => {
-  const { messages, currentUser, sendMessage, markThreadAsRead } = useApp();
+  const {
+    messages,
+    currentUser,
+    userRole,
+    groups,
+    cheerleaders,
+    squad,
+    sendMessage,
+    sendGroupMessage,
+    markThreadAsRead,
+    markGroupThreadAsRead,
+  } = useApp();
   const [openThreadId, setOpenThreadId] = useState(null);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
 
   const myId = currentUser?.id;
+  const isCoach = userRole === 'coach';
 
-  const threads = useMemo(() => {
+  const myGroups = useMemo(() => {
+    if (isCoach) return groups;
+    const linkedId = currentUser?.childId || currentUser?.cheerleaderId;
+    const cheer = cheerleaders.find((c) => c.id === linkedId);
+    if (!cheer) return [];
+    return groups.filter((g) => (cheer.groupIds || []).includes(g.id));
+  }, [groups, cheerleaders, currentUser, isCoach]);
+
+  const directThreads = useMemo(() => {
     const byCounterpart = new Map();
     messages
-      .filter((m) => m.toId === myId || m.fromId === myId)
+      .filter((m) => !m.groupId && (m.toId === myId || m.fromId === myId))
       .forEach((m) => {
         const counterpartId = m.fromId === myId ? m.toId : m.fromId;
         if (!counterpartId) return;
         if (!byCounterpart.has(counterpartId)) {
           byCounterpart.set(counterpartId, {
+            id: `direct:${counterpartId}`,
+            kind: 'direct',
             counterpartId,
-            counterpartName: m.fromId === myId ? 'Parent' : m.fromName,
+            name: m.fromId === myId ? 'Coach' : m.fromName,
+            avatar: '👤',
             messages: [],
             unread: 0,
           });
@@ -52,36 +77,84 @@ const MessageInbox = () => {
         const thread = byCounterpart.get(counterpartId);
         thread.messages.push(m);
         if (m.toId === myId && !m.read) thread.unread += 1;
-        if (m.fromId !== myId && m.fromName) thread.counterpartName = m.fromName;
+        if (m.fromId !== myId && m.fromName) thread.name = m.fromName;
       });
 
-    return [...byCounterpart.values()]
-      .map((thread) => ({
-        ...thread,
-        messages: [...thread.messages].sort(
-          (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-        ),
-      }))
-      .sort((a, b) => {
-        const aLast = a.messages[a.messages.length - 1]?.timestamp || 0;
-        const bLast = b.messages[b.messages.length - 1]?.timestamp || 0;
+    // Parents/cheerleaders always get a pinned thread with the coach, even
+    // before the first message, so they can start the conversation.
+    if (!isCoach && squad?.coachId && !byCounterpart.has(squad.coachId)) {
+      byCounterpart.set(squad.coachId, {
+        id: `direct:${squad.coachId}`,
+        kind: 'direct',
+        counterpartId: squad.coachId,
+        name: 'Coach',
+        avatar: '👤',
+        messages: [],
+        unread: 0,
+      });
+    }
+
+    return [...byCounterpart.values()].map((thread) => ({
+      ...thread,
+      messages: [...thread.messages].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)),
+    }));
+  }, [messages, myId, isCoach, squad]);
+
+  const groupThreads = useMemo(
+    () =>
+      myGroups.map((g) => {
+        const groupMessages = messages
+          .filter((m) => m.groupId === g.id)
+          .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        const unread = groupMessages.filter(
+          (m) => m.fromId !== myId && !(m.readBy || []).includes(myId)
+        ).length;
+        return {
+          id: `group:${g.id}`,
+          kind: 'group',
+          groupId: g.id,
+          name: g.name,
+          avatar: g.icon || '👥',
+          messages: groupMessages,
+          unread,
+        };
+      }),
+    [myGroups, messages, myId]
+  );
+
+  const threads = useMemo(
+    () =>
+      [...directThreads, ...groupThreads].sort((a, b) => {
+        const aLast = a.messages[a.messages.length - 1]?.timestamp || '';
+        const bLast = b.messages[b.messages.length - 1]?.timestamp || '';
+        if (!aLast && !bLast) return a.name.localeCompare(b.name);
+        if (!aLast) return 1;
+        if (!bLast) return -1;
         return new Date(bLast) - new Date(aLast);
-      });
-  }, [messages, myId]);
+      }),
+    [directThreads, groupThreads]
+  );
 
-  const openThread = threads.find((t) => t.counterpartId === openThreadId) || null;
+  const openThread = threads.find((t) => t.id === openThreadId) || null;
 
   const handleOpen = (thread) => {
-    setOpenThreadId(thread.counterpartId);
+    setOpenThreadId(thread.id);
     setReply('');
-    if (thread.unread > 0) markThreadAsRead(thread.counterpartId);
+    if (thread.unread > 0) {
+      if (thread.kind === 'group') markGroupThreadAsRead(thread.groupId);
+      else markThreadAsRead(thread.counterpartId);
+    }
   };
 
   const handleReply = async () => {
     if (!reply.trim() || !openThread || sending) return;
     setSending(true);
     try {
-      await sendMessage(openThread.counterpartId, reply.trim());
+      if (openThread.kind === 'group') {
+        await sendGroupMessage(openThread.groupId, reply.trim());
+      } else {
+        await sendMessage(openThread.counterpartId, reply.trim());
+      }
       setReply('');
     } finally {
       setSending(false);
@@ -91,9 +164,7 @@ const MessageInbox = () => {
   if (threads.length === 0) {
     return (
       <View style={styles.emptyWrap}>
-        <Text style={styles.empty}>
-          No messages yet. Parents can reach you from their Contact Coach tab.
-        </Text>
+        <Text style={styles.empty}>No conversations yet.</Text>
       </View>
     );
   }
@@ -110,22 +181,30 @@ const MessageInbox = () => {
             <Text style={styles.backBtn}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.threadTitle} numberOfLines={1}>
-            {openThread.counterpartName || 'Parent'}
+            {openThread.avatar} {openThread.name}
           </Text>
         </View>
 
         <ScrollView contentContainerStyle={styles.threadBody} keyboardShouldPersistTaps="handled">
-          {openThread.messages.map((m) => {
-            const mine = m.fromId === myId;
-            return (
-              <View key={m.id} style={[styles.bubble, mine ? styles.bubbleSent : styles.bubbleReceived]}>
-                <Text style={styles.bubbleMeta}>
-                  {mine ? 'You' : m.fromName} · {formatTime(m.timestamp)}
-                </Text>
-                <Text style={[styles.bubbleText, mine && styles.bubbleTextSent]}>{m.content}</Text>
-              </View>
-            );
-          })}
+          {openThread.messages.length === 0 ? (
+            <Text style={styles.empty}>
+              {openThread.kind === 'group'
+                ? `Say hi to ${openThread.name} — everyone in the group will see it.`
+                : 'Send the first message.'}
+            </Text>
+          ) : (
+            openThread.messages.map((m) => {
+              const mine = m.fromId === myId;
+              return (
+                <View key={m.id} style={[styles.bubble, mine ? styles.bubbleSent : styles.bubbleReceived]}>
+                  <Text style={styles.bubbleMeta}>
+                    {mine ? 'You' : m.fromName} · {formatTime(m.timestamp)}
+                  </Text>
+                  <Text style={[styles.bubbleText, mine && styles.bubbleTextSent]}>{m.content}</Text>
+                </View>
+              );
+            })
+          )}
         </ScrollView>
 
         <View style={styles.replyRow}>
@@ -155,15 +234,22 @@ const MessageInbox = () => {
         const last = thread.messages[thread.messages.length - 1];
         return (
           <TouchableOpacity
-            key={thread.counterpartId}
+            key={thread.id}
             style={[styles.threadItem, thread.unread > 0 && styles.threadItemUnread]}
             onPress={() => handleOpen(thread)}
           >
-            <Text style={styles.threadAvatar}>👤</Text>
+            <Text style={styles.threadAvatar}>{thread.avatar}</Text>
             <View style={styles.threadInfo}>
-              <Text style={styles.threadName}>{thread.counterpartName || 'Parent'}</Text>
+              <View style={styles.threadNameRow}>
+                <Text style={styles.threadName}>{thread.name}</Text>
+                {thread.kind === 'group' && (
+                  <View style={styles.groupTag}>
+                    <Text style={styles.groupTagText}>Group</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.threadPreview} numberOfLines={1}>
-                {last?.content}
+                {last?.content || 'No messages yet'}
               </Text>
             </View>
             {thread.unread > 0 && (
@@ -194,7 +280,16 @@ const styles = StyleSheet.create({
   threadItemUnread: { borderWidth: 1, borderColor: colors.primary },
   threadAvatar: { fontSize: 24, marginRight: 10 },
   threadInfo: { flex: 1 },
+  threadNameRow: { flexDirection: 'row', alignItems: 'center' },
   threadName: { fontWeight: '700', color: colors.textPrimary },
+  groupTag: {
+    marginLeft: 6,
+    backgroundColor: '#eef2ff',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  groupTagText: { fontSize: 10, fontWeight: '700', color: colors.primary },
   threadPreview: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   unreadDot: {
     minWidth: 22,

@@ -76,6 +76,11 @@ service cloud.firestore {
         allow write: if isCoachOfSquad(squadId);
       }
 
+      match /events/{eventId} {
+        allow read: if inSquad(squadId);
+        allow write: if isCoachOfSquad(squadId);
+      }
+
       match /messages/{messageId} {
         allow read: if inSquad(squadId);
         allow create: if inSquad(squadId) && request.resource.data.fromId == request.auth.uid;
