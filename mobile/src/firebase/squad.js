@@ -49,6 +49,18 @@ export const addMember = (squadId, uid, role, displayName, linkedCheerleaderId =
     joinedAt: serverTimestamp(),
   });
 
+// Accounts created before the members roster existed (or that missed the
+// write for any other reason) never got a members/{uid} doc, so they're
+// invisible in the "message these people" picker. Every signed-in user's own
+// client self-heals its own doc on load — nobody else can write it for them,
+// since the rule only allows request.auth.uid == uid.
+export const ensureOwnMemberDoc = async (squadId, uid, role, displayName, linkedCheerleaderId) => {
+  const ref = doc(db, 'squads', squadId, 'members', uid);
+  const snap = await getDoc(ref);
+  if (snap.exists()) return;
+  await addMember(squadId, uid, role, displayName, linkedCheerleaderId || null);
+};
+
 export const createSquad = async (coachUid, squadName, displayName) => {
   const squadRef = doc(collection(db, 'squads'));
   const inviteCode = randomInviteCode();

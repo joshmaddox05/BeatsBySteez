@@ -80,6 +80,18 @@ export const AppProvider = ({ children }) => {
     squadApi.ensureSquadDefaults(profile.squadId, profile.displayName).catch(() => {});
   }, [profile?.squadId, profile?.role, profile?.displayName]);
 
+  // Every role self-heals its own members/{uid} roster doc on load — accounts
+  // created before that roster existed (or any account, for any reason,
+  // that's missing it) would otherwise be invisible in the "message these
+  // people" picker. Nobody but the account owner can write this doc, so it
+  // can't be backfilled from the coach's side.
+  useEffect(() => {
+    if (!profile?.squadId || !firebaseUser) return;
+    squadApi
+      .ensureOwnMemberDoc(profile.squadId, firebaseUser.uid, profile.role, profile.displayName, profile.linkedCheerleaderId)
+      .catch(() => {});
+  }, [profile?.squadId, profile?.role, profile?.displayName, profile?.linkedCheerleaderId, firebaseUser]);
+
   // Squad sub-collections
   useEffect(() => {
     const squadId = profile?.squadId;

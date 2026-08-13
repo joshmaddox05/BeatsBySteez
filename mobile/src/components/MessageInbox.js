@@ -24,6 +24,11 @@ const formatTime = (iso) => {
 };
 
 const ROLE_LABELS = { coach: 'Coach', parent: 'Parent', cheerleader: 'Cheerleader' };
+const ROLE_SECTIONS = [
+  { key: 'coach', label: '🏆 Coaches' },
+  { key: 'cheerleader', label: '📣 Cheerleaders' },
+  { key: 'parent', label: '👨‍👩‍👧 Parents' },
+];
 
 // Three kinds of thread share this list: direct (one other uid), group (one
 // squad group, open to the coach plus everyone linked to a member of it),
@@ -53,7 +58,6 @@ const MessageInbox = () => {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const [composing, setComposing] = useState(false);
-  const [composeSearch, setComposeSearch] = useState('');
   const [composeSelected, setComposeSelected] = useState([]);
   const [composeBusy, setComposeBusy] = useState(false);
 
@@ -180,21 +184,51 @@ const MessageInbox = () => {
 
   const openThread = threads.find((t) => t.id === openThreadId) || null;
 
-  const pickablePeople = useMemo(() => {
-    const term = composeSearch.trim().toLowerCase();
-    return members
-      .filter((m) => m.uid !== myId)
-      .map((m) => {
-        const linkedCheer = m.linkedCheerleaderId
-          ? cheerleaders.find((c) => c.id === m.linkedCheerleaderId)
-          : null;
-        const roleLabel = ROLE_LABELS[m.role] || m.role;
-        const subtitle = linkedCheer ? `${roleLabel} · ${linkedCheer.name}` : roleLabel;
-        return { uid: m.uid, name: m.displayName || 'Member', subtitle, role: m.role };
-      })
-      .filter((p) => !term || p.name.toLowerCase().includes(term) || p.subtitle.toLowerCase().includes(term))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [members, cheerleaders, myId, composeSearch]);
+  // A tap-to-pick avatar grid, grouped by role, instead of a search box —
+  // squads are small enough that browsing beats typing a name.
+  const personFromMember = (m) => {
+    const linkedCheer = m.linkedCheerleaderId ? cheerleaders.find((c) => c.id === m.linkedCheerleaderId) : null;
+    const avatar = m.role === 'coach' ? '🏆' : m.role === 'cheerleader' ? linkedCheer?.avatar || '📣' : '👨‍👩‍👧';
+    const subtitle = m.role === 'parent' && linkedCheer ? `${linkedCheer.name}’s parent` : ROLE_LABELS[m.role] || m.role;
+    return { uid: m.uid, name: m.displayName || 'Member', avatar, subtitle, role: m.role };
+  };
+
+  const pickableMembers = useMemo(() => members.filter((m) => m.uid !== myId), [members, myId]);
+
+  const pickableByRole = useMemo(() => {
+    const sections = {};
+    pickableMembers
+      .map(personFromMember)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((person) => {
+        (sections[person.role] = sections[person.role] || []).push(person);
+      });
+    return sections;
+  }, [pickableMembers, cheerleaders]);
+
+  // "Pick a whole group" chips: selects/deselects every member (cheerleader
+  // + parent) linked to that squad group in one tap, instead of hand-picking
+  // each person.
+  const peopleInGroup = (groupId) => {
+    const cheerIds = cheerleaders.filter((c) => (c.groupIds || []).includes(groupId)).map((c) => c.id);
+    return pickableMembers
+      .filter((m) => m.linkedCheerleaderId && cheerIds.includes(m.linkedCheerleaderId))
+      .map(personFromMember);
+  };
+
+  const toggleGroupSelect = (groupId) => {
+    const groupPeople = peopleInGroup(groupId);
+    if (groupPeople.length === 0) return;
+    const allSelected = groupPeople.every((p) => composeSelected.some((s) => s.uid === p.uid));
+    setComposeSelected((prev) => {
+      if (allSelected) return prev.filter((p) => !groupPeople.some((g) => g.uid === p.uid));
+      const merged = [...prev];
+      groupPeople.forEach((p) => {
+        if (!merged.some((m) => m.uid === p.uid)) merged.push(p);
+      });
+      return merged;
+    });
+  };
 
   const handleOpen = (thread) => {
     setOpenThreadId(thread.id);
@@ -225,7 +259,6 @@ const MessageInbox = () => {
   };
 
   const openCompose = () => {
-    setComposeSearch('');
     setComposeSelected([]);
     setComposing(true);
   };
@@ -284,16 +317,6 @@ const MessageInbox = () => {
           <Text style={styles.threadTitle}>New Message</Text>
         </View>
 
-        <View style={styles.composeSearchWrap}>
-          <TextInput
-            style={styles.composeSearchInput}
-            value={composeSearch}
-            onChangeText={setComposeSearch}
-            placeholder="Search people..."
-            placeholderTextColor={colors.textSecondary}
-          />
-        </View>
-
         {composeSelected.length > 0 && (
           <View style={styles.selectedRow}>
             <Text style={styles.selectedText} numberOfLines={1}>
@@ -302,24 +325,72 @@ const MessageInbox = () => {
           </View>
         )}
 
-        <ScrollView contentContainerStyle={styles.list}>
-          {pickablePeople.length === 0 ? (
+        <ScrollView contentContainerStyle={styles.composeScroll}>
+          {groups.length > 0 && (
+            <View style={styles.pickSection}>
+              <Text style={styles.pickSectionLabel}>Pick a whole group</Text>
+              <View style={styles.chipRow}>
+                {groups.map((group) => {
+                  const groupPeople = peopleInGroup(group.id);
+                  if (groupPeople.length === 0) return null;
+                  const allSelected = groupPeople.every((p) => composeSelected.some((s) => s.uid === p.uid));
+                  return (
+                    <TouchableOpacity
+                      key={group.id}
+                      style={[
+                        styles.groupChip,
+                        { borderColor: group.color },
+                        allSelected && { backgroundColor: group.color },
+                      ]}
+                      onPress={() => toggleGroupSelect(group.id)}
+                    >
+                      <Text style={[styles.groupChipText, allSelected && styles.groupChipTextActive]}>
+                        {group.icon} {group.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {pickableMembers.length === 0 ? (
             <Text style={styles.empty}>No one else has joined the squad yet.</Text>
           ) : (
-            pickablePeople.map((person) => {
-              const selected = composeSelected.some((p) => p.uid === person.uid);
+            ROLE_SECTIONS.map((section) => {
+              const people = pickableByRole[section.key] || [];
+              if (people.length === 0) return null;
               return (
-                <TouchableOpacity
-                  key={person.uid}
-                  style={[styles.pickRow, selected && styles.pickRowSelected]}
-                  onPress={() => toggleComposeSelected(person)}
-                >
-                  <View style={styles.pickCheck}>{selected && <Text style={styles.pickCheckMark}>✓</Text>}</View>
-                  <View style={styles.threadInfo}>
-                    <Text style={styles.threadName}>{person.name}</Text>
-                    <Text style={styles.threadPreview}>{person.subtitle}</Text>
+                <View key={section.key} style={styles.pickSection}>
+                  <Text style={styles.pickSectionLabel}>{section.label}</Text>
+                  <View style={styles.personGrid}>
+                    {people.map((person) => {
+                      const selected = composeSelected.some((p) => p.uid === person.uid);
+                      return (
+                        <TouchableOpacity
+                          key={person.uid}
+                          style={styles.personCard}
+                          onPress={() => toggleComposeSelected(person)}
+                        >
+                          <View style={[styles.personAvatarWrap, selected && styles.personAvatarWrapSelected]}>
+                            <Text style={styles.personAvatar}>{person.avatar}</Text>
+                            {selected && (
+                              <View style={styles.personCheck}>
+                                <Text style={styles.personCheckMark}>✓</Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={styles.personName} numberOfLines={1}>
+                            {person.name}
+                          </Text>
+                          <Text style={styles.personSubtitle} numberOfLines={1}>
+                            {person.subtitle}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
-                </TouchableOpacity>
+                </View>
               );
             })
           )}
@@ -543,38 +614,52 @@ const styles = StyleSheet.create({
   },
   sendBtnText: { color: '#fff', fontWeight: '700' },
   disabled: { opacity: 0.5 },
-  composeSearchWrap: { padding: 12, paddingBottom: 0 },
-  composeSearchInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: colors.textPrimary,
-    backgroundColor: colors.card,
-  },
-  selectedRow: { paddingHorizontal: 16, paddingTop: 8 },
+  selectedRow: { paddingHorizontal: 16, paddingTop: 12 },
   selectedText: { color: colors.primary, fontWeight: '600', fontSize: 12 },
-  pickRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  composeScroll: { padding: 16 },
+  pickSection: { marginBottom: 20 },
+  pickSectionLabel: { fontWeight: '700', color: colors.textPrimary, marginBottom: 10, fontSize: 13 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  groupChip: {
+    borderWidth: 1.5,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
   },
-  pickRowSelected: { borderWidth: 1, borderColor: colors.primary },
-  pickCheck: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
+  groupChipText: { fontWeight: '700', fontSize: 12, color: colors.textPrimary },
+  groupChipTextActive: { color: '#fff' },
+  personGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  personCard: { width: 76, alignItems: 'center' },
+  personAvatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.card,
+    borderWidth: 2,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginBottom: 6,
   },
-  pickCheckMark: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  personAvatarWrapSelected: { borderColor: colors.primary, backgroundColor: '#eef2ff' },
+  personAvatar: { fontSize: 24 },
+  personCheck: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personCheckMark: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  personName: { fontSize: 12, fontWeight: '700', color: colors.textPrimary, textAlign: 'center' },
+  personSubtitle: { fontSize: 10, color: colors.textSecondary, textAlign: 'center', marginTop: 1 },
   composeFooter: { padding: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card },
 });
 
