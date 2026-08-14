@@ -194,17 +194,45 @@ export const AppProvider = ({ children }) => {
     // threads/{threadId} read rule checks resource.data.memberIds, and
     // Firestore rejects an entire unfiltered list query outright when the
     // rule can't be proven true for every possible result up front.
+    //
+    // Two queries, unioned: threads I'm a member of by uid, plus threads
+    // addressed to my roster slot — which is how I find one started before I
+    // had an account. array-contains can't be OR'd in a single query, and the
+    // read rule mirrors the same two cases.
+    const threadsRef = collection(db, 'squads', squadId, 'threads');
+    const mySlot = squadApi.slotForRole(profile?.role, profile?.linkedCheerleaderId);
+    const byMemberId = new Map();
+    const bySlot = new Map();
+    const publishThreads = () =>
+      setCustomThreads([...new Map([...byMemberId, ...bySlot]).values()]);
+    const collect = (target) => (snap) => {
+      target.clear();
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        target.set(d.id, { id: d.id, ...data, createdAt: toIsoString(data.createdAt) });
+      });
+      publishThreads();
+    };
+
+    // Both thread listeners swallow permission errors: until firestore.rules is
+    // deployed the threads collection has no rule at all, and an unhandled
+    // listener error surfaces as a red box over the whole app rather than just
+    // an empty thread list.
     const unsubThreads = onSnapshot(
-      query(collection(db, 'squads', squadId, 'threads'), where('memberIds', 'array-contains', firebaseUser.uid)),
-      (snap) => {
-        setCustomThreads(
-          snap.docs.map((d) => {
-            const data = d.data();
-            return { id: d.id, ...data, createdAt: toIsoString(data.createdAt) };
-          })
-        );
-      }
+      query(threadsRef, where('memberIds', 'array-contains', firebaseUser.uid)),
+      collect(byMemberId),
+      () => {}
     );
+
+    // Degrades quietly when firestore.rules hasn't been redeployed with the
+    // memberSlots clause yet: the uid-based thread list still works.
+    const unsubSlotThreads = mySlot
+      ? onSnapshot(
+          query(threadsRef, where('memberSlots', 'array-contains', mySlot)),
+          collect(bySlot),
+          () => {}
+        )
+      : undefined;
 
     return () => {
       unsubCheerleaders();
@@ -218,8 +246,9 @@ export const AppProvider = ({ children }) => {
       unsubEvents();
       unsubMembers();
       unsubThreads();
+      if (unsubSlotThreads) unsubSlotThreads();
     };
-  }, [profile?.squadId, firebaseUser?.uid]);
+  }, [profile?.squadId, firebaseUser?.uid, profile?.role, profile?.linkedCheerleaderId]);
 
   const currentUser = useMemo(() => {
     if (!firebaseUser || !profile) return null;
@@ -413,6 +442,22 @@ export const AppProvider = ({ children }) => {
 
   const markThreadAsRead = (otherId) => squadApi.markThreadAsRead(profile.squadId, firebaseUser.uid, otherId);
 
+  // The signed-in user's own roster slot, or null for coaches (who aren't
+  // linked to a cheerleader). Messages addressed to this slot are mine.
+  const mySlot = squadApi.slotForRole(profile?.role, profile?.linkedCheerleaderId);
+
+  // Slot messages: addressed to a spot on the roster rather than an account,
+  // so a coach can write to a cheerleader or parent who hasn't signed up yet.
+  const sendSlotMessage = (toSlot, content) =>
+    squadApi.sendSlotMessage(profile.squadId, firebaseUser.uid, profile.displayName, profile.role, toSlot, content);
+
+  // Takes the thread's own messages rather than a person id: one person's
+  // thread can hold both slot-addressed and uid-addressed messages, and
+  // clearing by person would also clear identical messages sitting in someone
+  // else's thread.
+  const markPersonThreadAsRead = (threadMessages) =>
+    squadApi.markMessagesAsRead(profile.squadId, threadMessages, firebaseUser.uid);
+
   // Group threads: one per squad group (Varsity, JV, ...), open to the coach
   // and every parent/cheerleader linked to a member of that group.
   const sendGroupMessage = (groupId, content) => {
@@ -431,14 +476,34 @@ export const AppProvider = ({ children }) => {
     squadApi.markGroupThreadAsRead(profile.squadId, groupId, firebaseUser.uid);
 
   // Custom threads: a hand-picked set of people, not tied to a squad group —
-  // the "message these specific people" case. `participants` is [{ uid, name }],
-  // not including the caller (the caller is added on the backend).
+  // the "message these specific people" case. `participants` is
+  // [{ uids, slot, name }], not including the caller (the caller is added on
+  // the backend). Everyone on the roster contributes their slot as well as any
+  // uid they already have, so the thread also finds accounts created after it.
   const createCustomThread = (participants) => {
-    const memberIds = participants.map((p) => p.uid);
-    const memberNames = participants.reduce((acc, p) => ({ ...acc, [p.uid]: p.name }), {
-      [firebaseUser.uid]: profile.displayName,
-    });
-    return squadApi.createCustomThread(profile.squadId, firebaseUser.uid, memberIds, memberNames);
+    const memberIds = participants.flatMap((p) => p.uids || []);
+    const memberNames = participants.reduce(
+      (acc, p) => {
+        (p.uids || []).forEach((uid) => {
+          acc[uid] = p.name;
+        });
+        return acc;
+      },
+      { [firebaseUser.uid]: profile.displayName }
+    );
+
+    const onRoster = participants.filter((p) => p.slot);
+    const memberSlots = onRoster.map((p) => p.slot);
+    const slotNames = onRoster.reduce((acc, p) => ({ ...acc, [p.slot]: p.name }), {});
+
+    return squadApi.createCustomThread(
+      profile.squadId,
+      firebaseUser.uid,
+      memberIds,
+      memberNames,
+      memberSlots,
+      slotNames
+    );
   };
   const sendThreadMessage = (threadId, content) =>
     squadApi.sendThreadMessage(profile.squadId, threadId, firebaseUser.uid, profile.displayName, profile.role, content);
@@ -453,6 +518,13 @@ export const AppProvider = ({ children }) => {
     const direct = messages.filter((m) => m.toId === userId && !m.read).length;
     if (userId !== currentUser?.id) return direct;
 
+    // Sent to my roster slot before (or after) I had an account.
+    const slot = mySlot
+      ? messages.filter(
+          (m) => m.toSlot === mySlot && m.fromId !== userId && !(m.readBy || []).includes(userId)
+        ).length
+      : 0;
+
     const linkedId = currentUser?.childId || currentUser?.cheerleaderId;
     const myGroupIds =
       userRole === 'coach'
@@ -462,12 +534,14 @@ export const AppProvider = ({ children }) => {
       (m) => m.groupId && myGroupIds.includes(m.groupId) && m.fromId !== userId && !(m.readBy || []).includes(userId)
     ).length;
 
-    const myThreadIds = customThreads.filter((t) => (t.memberIds || []).includes(userId)).map((t) => t.id);
+    // Both thread listeners are already scoped to me, so every thread in
+    // state is one I belong to — by uid or by pending roster slot.
+    const myThreadIds = customThreads.map((t) => t.id);
     const custom = messages.filter(
       (m) => m.threadId && myThreadIds.includes(m.threadId) && m.fromId !== userId && !(m.readBy || []).includes(userId)
     ).length;
 
-    return direct + group + custom;
+    return direct + slot + group + custom;
   };
 
   // Categories
@@ -637,6 +711,9 @@ export const AppProvider = ({ children }) => {
     getMessagesForUser,
     markMessageAsRead,
     markThreadAsRead,
+    mySlot,
+    sendSlotMessage,
+    markPersonThreadAsRead,
     getUnreadCount,
     sendGroupMessage,
     markGroupThreadAsRead,

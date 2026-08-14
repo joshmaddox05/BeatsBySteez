@@ -350,6 +350,20 @@ export const updateEvent = (squadId, eventId, updates) =>
 export const removeEvent = (squadId, eventId) =>
   deleteDoc(doc(db, 'squads', squadId, 'events', eventId));
 
+// A "slot" names a person by their place on the roster — which cheerleader,
+// and whether it's the athlete herself or her parent — instead of by account
+// uid. Coaches can then start a conversation with someone who has not signed
+// up yet; whoever links to that roster spot later picks up the whole history.
+// Kept in sync with mySlot() in firestore.rules.
+export const slotForAudience = (audience, cheerleaderId) => `${audience}:${cheerleaderId}`;
+
+export const slotForRole = (role, cheerleaderId) => {
+  if (!cheerleaderId) return null;
+  if (role === 'cheerleader') return `athlete:${cheerleaderId}`;
+  if (role === 'parent') return `parent:${cheerleaderId}`;
+  return null;
+};
+
 export const sendMessage = async (squadId, fromId, fromName, fromRole, toId, content) => {
   const ref = doc(collection(db, 'squads', squadId, 'messages'));
   const message = {
@@ -379,6 +393,49 @@ export const markThreadAsRead = async (squadId, myId, otherId) => {
   snap.docs.forEach((d) => {
     if (!d.data().read) batch.set(d.ref, { read: true }, { merge: true });
   });
+  await batch.commit();
+};
+
+// Addressed to a roster slot rather than a uid. Uses `readBy` instead of a
+// boolean `read` because more than one account can link to the same slot (both
+// of a cheerleader's parents, say), so "read" has to be tracked per person.
+export const sendSlotMessage = async (squadId, fromId, fromName, fromRole, toSlot, content) => {
+  const ref = doc(collection(db, 'squads', squadId, 'messages'));
+  const message = {
+    fromId,
+    fromName,
+    fromRole,
+    toId: null,
+    toSlot,
+    content,
+    timestamp: serverTimestamp(),
+    readBy: [fromId],
+  };
+  await setDoc(ref, message);
+  return { id: ref.id, ...message };
+};
+
+// Marks an exact set of already-loaded messages as read by me. A person's
+// thread can mix both shapes — uid-addressed messages carry a boolean `read`,
+// slot-addressed ones carry `readBy`, since several accounts can sit on the
+// receiving end of one message — so the shape is decided per message.
+export const markMessagesAsRead = async (squadId, messages, myId) => {
+  const batch = writeBatch(db);
+  let pending = 0;
+
+  messages.forEach((m) => {
+    const ref = doc(db, 'squads', squadId, 'messages', m.id);
+    if (Array.isArray(m.readBy)) {
+      if (m.readBy.includes(myId)) return;
+      batch.set(ref, { readBy: arrayUnion(myId) }, { merge: true });
+    } else {
+      if (m.toId !== myId || m.read) return;
+      batch.set(ref, { read: true }, { merge: true });
+    }
+    pending += 1;
+  });
+
+  if (pending === 0) return;
   await batch.commit();
 };
 
@@ -418,13 +475,29 @@ export const markGroupThreadAsRead = async (squadId, groupId, myId) => {
 
 // Custom threads are a hand-picked set of people (any mix of coach, parents,
 // cheerleaders) that isn't tied to an existing squad group — the "message
-// these specific people" case. `memberNames` is denormalized onto the thread
-// doc so the inbox can render a title without extra reads.
-export const createCustomThread = async (squadId, creatorUid, memberIds, memberNames) => {
+// these specific people" case. `memberNames`/`slotNames` are denormalized onto
+// the thread doc so the inbox can render a title without extra reads.
+//
+// Membership is recorded twice over: `memberIds` for accounts that exist right
+// now, and `memberSlots` for the roster spots those people occupy. The read
+// rule matches either, so a cheerleader or parent who signs up later — or a
+// second parent linking to the same athlete — picks the thread up with its
+// backlog intact. `memberSlots` is always written (even empty) so the rule's
+// array lookup never hits a missing field.
+export const createCustomThread = async (
+  squadId,
+  creatorUid,
+  memberIds,
+  memberNames,
+  memberSlots = [],
+  slotNames = {}
+) => {
   const ref = doc(collection(db, 'squads', squadId, 'threads'));
   const data = {
     memberIds: [...new Set([...memberIds, creatorUid])],
     memberNames,
+    memberSlots: [...new Set(memberSlots)],
+    slotNames,
     createdBy: creatorUid,
     createdAt: serverTimestamp(),
   };
