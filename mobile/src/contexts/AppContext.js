@@ -214,23 +214,26 @@ export const AppProvider = ({ children }) => {
       publishThreads();
     };
 
-    // Both thread listeners swallow permission errors: until firestore.rules is
-    // deployed the threads collection has no rule at all, and an unhandled
-    // listener error surfaces as a red box over the whole app rather than just
-    // an empty thread list.
+    // Both thread listeners log rather than throw: an unhandled listener error
+    // surfaces as a red box over the whole app, when an empty thread list plus
+    // a line in the Metro log is the useful failure. A permission-denied here
+    // almost always means firestore.rules needs redeploying.
+    const onThreadsError = (label) => (e) =>
+      console.log(`[threads:${label}] ${e.code} — redeploy firestore.rules?`);
+
     const unsubThreads = onSnapshot(
       query(threadsRef, where('memberIds', 'array-contains', firebaseUser.uid)),
       collect(byMemberId),
-      () => {}
+      onThreadsError('memberIds')
     );
 
-    // Degrades quietly when firestore.rules hasn't been redeployed with the
-    // memberSlots clause yet: the uid-based thread list still works.
+    // Degrades to the uid-based thread list alone when firestore.rules hasn't
+    // been redeployed with the memberSlots clause yet.
     const unsubSlotThreads = mySlot
       ? onSnapshot(
           query(threadsRef, where('memberSlots', 'array-contains', mySlot)),
           collect(bySlot),
-          () => {}
+          onThreadsError('memberSlots')
         )
       : undefined;
 
