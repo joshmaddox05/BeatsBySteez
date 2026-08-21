@@ -71,9 +71,23 @@ service cloud.firestore {
         }
       }
 
-      match /announcements/{announcementId} {
+      match /announcements/{postId} {
         allow read: if inSquad(squadId);
-        allow write: if isCoachOfSquad(squadId);
+        allow create, delete: if isCoachOfSquad(squadId);
+
+        // Coach can edit anything; any squad member may update ONLY the
+        // `likedBy` field (like/unlike toggle).
+        allow update: if isCoachOfSquad(squadId) ||
+          (inSquad(squadId) &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy']));
+
+        match /comments/{commentId} {
+          allow read: if inSquad(squadId);
+          allow create: if inSquad(squadId) && request.resource.data.authorId == request.auth.uid;
+          allow update: if false;
+          allow delete: if isCoachOfSquad(squadId) ||
+            (inSquad(squadId) && resource.data.authorId == request.auth.uid);
+        }
       }
 
       match /messages/{messageId} {

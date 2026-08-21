@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myProfile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function inSquad(squadId) {
+      return isSignedIn() && myProfile().squadId == squadId;
+    }
+
+    function isCoachOfSquad(squadId) {
+      return isSignedIn() &&
+        firestore.get(/databases/(default)/documents/squads/$(squadId)).data.coachId == request.auth.uid;
+    }
+
+    match /squads/{squadId}/posts/{postId}/{fileName} {
+      allow read: if inSquad(squadId);
+      allow write: if isCoachOfSquad(squadId)
+                   && request.resource.size < 25 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*|video/.*');
+      allow delete: if isCoachOfSquad(squadId);
+    }
+  }
+}

@@ -4,6 +4,8 @@ import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { auth, db } from '../firebase/config';
 import * as authApi from '../firebase/auth';
 import * as squadApi from '../firebase/squad';
+import * as postsApi from '../firebase/posts';
+import * as storageApi from '../firebase/storage';
 import { defaultSquadRules } from '../data/defaultCategories';
 import { presetPacks } from '../data/presetPacks';
 
@@ -339,10 +341,44 @@ export const AppProvider = ({ children }) => {
 
   const getCheerleaderHistory = (cheerleaderId) => pointHistory.filter((p) => p.cheerleaderId === cheerleaderId);
 
-  // Announcements
-  const addAnnouncement = (title, content) =>
-    squadApi.addAnnouncement(profile.squadId, title, content, firebaseUser.uid, profile.displayName);
-  const removeAnnouncement = (id) => squadApi.removeAnnouncement(profile.squadId, id);
+  // Announcements (board posts)
+  //
+  // `mediaAsset` is an optional single asset object from expo-image-picker's
+  // result.assets array (type: 'image' | 'video'). Uploads before the post
+  // doc is written so the post always carries a resolved download URL.
+  const addAnnouncement = async (title, content, mediaAsset) => {
+    const postRef = postsApi.newPostRef(profile.squadId);
+    const media = mediaAsset ? [await storageApi.uploadPostMedia(profile.squadId, postRef.id, mediaAsset)] : [];
+    return postsApi.createPost(profile.squadId, postRef, {
+      title,
+      content,
+      authorUid: firebaseUser.uid,
+      authorName: profile.displayName,
+      media,
+    });
+  };
+
+  const removeAnnouncement = (id) => {
+    const post = announcements.find((a) => a.id === id);
+    return postsApi.removePost(profile.squadId, id, post?.media || []);
+  };
+
+  const toggleLike = (postId) => {
+    const post = announcements.find((a) => a.id === postId);
+    const isLiked = (post?.likedBy || []).includes(firebaseUser.uid);
+    return postsApi.toggleLike(profile.squadId, postId, firebaseUser.uid, isLiked);
+  };
+
+  const addPostComment = (postId, content, parentCommentId = null) =>
+    postsApi.addComment(profile.squadId, postId, {
+      authorId: firebaseUser.uid,
+      authorName: profile.displayName,
+      authorRole: profile.role,
+      content,
+      parentCommentId,
+    });
+
+  const removePostComment = (postId, commentId) => postsApi.removeComment(profile.squadId, postId, commentId);
 
   // Messages
   const sendMessage = (toId, content) =>
@@ -501,9 +537,12 @@ export const AppProvider = ({ children }) => {
     getCheerleaderHistory,
     getTodayPointTotal,
 
-    // Announcements
+    // Announcements (board posts)
     addAnnouncement,
     removeAnnouncement,
+    toggleLike,
+    addPostComment,
+    removePostComment,
 
     // Messages
     sendMessage,

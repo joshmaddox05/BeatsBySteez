@@ -230,22 +230,6 @@ export const removePointEntry = async (squadId, entryId) => {
   await batch.commit();
 };
 
-export const addAnnouncement = async (squadId, title, content, authorUid, authorName) => {
-  const ref = doc(collection(db, 'squads', squadId, 'announcements'));
-  const announcement = {
-    title,
-    content,
-    timestamp: serverTimestamp(),
-    authorId: authorUid,
-    authorName,
-  };
-  await setDoc(ref, announcement);
-  return { id: ref.id, ...announcement };
-};
-
-export const removeAnnouncement = (squadId, announcementId) =>
-  deleteDoc(doc(db, 'squads', squadId, 'announcements', announcementId));
-
 export const sendMessage = async (squadId, fromId, fromName, fromRole, toId, content) => {
   const ref = doc(collection(db, 'squads', squadId, 'messages'));
   const message = {
